@@ -3,7 +3,7 @@ package Daemond::Lite::Log::AdapterScreen;
 use strict;
 use parent qw(Log::Any::Adapter::Core);
 
-sub new { bless {@_},shift }
+sub new { my $pk = shift; bless {@_},$pk; }
 sub is_null {0}
 {
 	no strict 'refs';

@@ -1,5 +1,50 @@
 package Daemond::Lite;
 
+=head1 NAME
+
+Daemond::Lite - Lightweight version of daemonization toolkit
+
+=head1 SYNOPSIS
+
+    package main;
+    use Daemond::Lite;
+    
+    name 'sample';
+    config 'daemon.conf';
+    children 1;
+    pid '/tmp/%n.%u.pid';
+    nocli;
+    syslog 'local0';
+
+    sub start { # before fork
+        warn "$$ starting";
+    }
+
+    sub run { # inside forked child
+        warn "$$ run";
+        my $self = shift;
+        $self->{run} = 1;
+        while($self->{run}) {
+            sleep 1;
+        }
+    }
+
+    sub stop {
+        warn "$$ stop";
+        my $self = shift;
+        $self->{run} = 0;
+    }
+
+    runit()
+
+=head1 DESCRIPTION
+
+    Easy tool for creating daemons
+
+=cut
+
+our $VERSION = '0.05';
+
 use strict;
 
 use Cwd;
@@ -153,6 +198,12 @@ sub export_runit () {
 	$self->setup_scoreboard;
 	$self->{startup} = 1;
 	$self->{is_parent} = 1;
+	
+	
+	if (my $start = $self->{caller}->can('start')) {
+		$start->($self);
+	}
+	
 	while () {
 		#$self->d->proc->action('idle');
 		if ($self->{shutdown}) {
@@ -496,7 +547,7 @@ sub SIGCHLD {
 						$self->{dies}++;
 						if ( $self->{cf}{max_die} > 0 and $self->{dies} + 1 > ( $self->{cf}{max_die} ) * $self->{cf}{children} ) {
 							$self->log->critical("Children repeatedly died %d times, stopping",$self->{_}{dies});
-							$self->stop();
+							$self->shutdown(); # TODO: stop
 						}
 					} else {
 						$self->{dies} = 0;
@@ -708,29 +759,36 @@ sub shutdown {
 
 sub idle {}
 
-sub exec_child {
+sub setup_child_sig {
 	my $self = shift;
-	
-	$SIG{TERM} = bless(sub {
-		warn "$$: term received"; 
-		$self->{shutdown}++ and exit(1);
-		if( my $cb = $self->{caller}->can( 'stop' ) ) {
-			#eval {
-				$cb->($self);
-			#1} or do {
-			#	my $e = $@;
-			#	$self->log->error("Child error: $e");
-			#	die $e;
-			#}
-		} else {
-			exit(0);
-		}
-		#$self->log->alert("after-fork exit");
-		#exit(0);
-	}, 'Daemond::Lite::SIGNAL');
-	$SIG{INT}  = bless(sub { warn "$$: sigint to child"; }, 'Daemond::Lite::SIGNAL');
 	$SIG{PIPE} = 'IGNORE';
 	$SIG{CHLD} = 'IGNORE';
+	my %sig = (
+		TERM => bless(sub {
+			warn "$$: term received"; 
+			$self->{shutdown}++ and exit(1);
+			if( my $cb = $self->{caller}->can( 'stop' ) ) {
+				$cb->($self);
+			} else {
+				exit(0);
+			}
+		}, 'Daemond::Lite::SIGNAL'),
+		INT => bless(sub { warn "$$: sigint to child"; }, 'Daemond::Lite::SIGNAL'),
+	);
+	if( my $cb = $self->{caller}->can( 'on_sig' ) ) {
+		for my $sig (keys %sig) {
+			$cb->($self, $sig, $sig{$sig});
+		}
+	} else {
+		for my $sig (keys %sig) {
+			$SIG{$sig} = $sig{$sig};
+		}
+	}
+}
+
+sub exec_child {
+	my $self = shift;
+	$self->setup_child_sig;
 	
 	eval {
 		if( my $cb = $self->{caller}->can( 'run' ) ) {
@@ -753,3 +811,19 @@ sub call_stop {
 }
 
 1;
+__END__
+=back
+
+=head1 AUTHOR
+
+Mons Anderson, C<< <mons@cpan.org> >>
+
+=head1 COPYRIGHT & LICENSE
+
+Copyright 2012 Mons Anderson, all rights reserved.
+
+This program is free software; you can redistribute it and/or modify it
+under the terms of either: the GNU General Public License as published
+by the Free Software Foundation; or the Artistic License.
+
+=cut
