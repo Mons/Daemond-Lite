@@ -186,7 +186,7 @@ sub process {
 			}
 			$self->sayn(" <g>looks ok</>\n");
 			sleep 1;
-			kill 9 => $pid;
+			#kill 9 => $pid;
 =for rem
 		alarm 0;
 		# unless $child;
@@ -230,11 +230,11 @@ sub process {
 	$pkg->chroot($self);
 	$pkg->change_user($self);
 =cut
-	$self->log->notice("Daemonized! $$");
-	$slog->("daemonized: $$");
-	$on_end = sub {
-		warn "Process $$ gone";
-	};
+	#$self->log->notice("Daemonized! $$");
+	#$slog->("daemonized: $$");
+	#$on_end = sub {
+	#	warn( "Process $$ gone" );
+	#};
 	return;
 }
 
@@ -245,17 +245,17 @@ sub redirect_output {
 	return unless $self->{cf}{detach};
 	# Keep fileno of std* correct.
 	#$self->log->notice("std* fileno = %d, %d, %d", (fileno STDIN, fileno STDOUT, fileno STDERR));
-	$logcmd->("Logging ok");
+	#$logcmd->("Logging ok");
 	close STDIN;  open STDIN,  '<', '/dev/null' or die "open STDIN  < /dev/null failed: $!";
 	close STDOUT; open STDOUT, '>', '/dev/null' or die "open STDOUT > /dev/null failed: $!";
 	close STDERR; open STDERR, '>', '/dev/null' or die "open STDERR > /dev/null failed: $!";
 	#$logcmd->( "STD closed %d, %d, %d", fileno STDIN, fileno STDOUT, fileno STDERR );
 	if ($self->{cf}{verbose} > 0) {
-		tie *STDERR, 'Daemond::Lite::Tie::Handle', sub { $logcmd->( "STDERR: ".$_[0] ); $self->log->warning($_[0]) };
+		tie *STDERR, 'Daemond::Lite::Tie::Handle', sub { $self->log->warning("STDERR: ".$_[0]) };
 	}
-	$logcmd->("Logging ok\n");
+	#$logcmd->("Logging ok\n");
 	if ($self->{cf}{verbose} > 1) {
-		tie *STDOUT, 'Daemond::Lite::Tie::Handle', sub { $logcmd->( "STDOUT: ".$_[0] ); $self->log->notice($_[0]) };
+		tie *STDOUT, 'Daemond::Lite::Tie::Handle', sub { $self->log->debug("STDOUT: ".$_[0]) };
 	}
 	#$self->log->notice("std* fileno = %d, %d, %d", fileno STDIN, fileno STDOUT, fileno STDERR);
 	#$self->log->warn( "Logging initialized" );

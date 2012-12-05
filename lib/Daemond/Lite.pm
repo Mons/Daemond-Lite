@@ -13,8 +13,23 @@ Daemond::Lite - Lightweight version of daemonization toolkit
     config 'daemon.conf';
     children 1;
     pid '/tmp/%n.%u.pid';
-    nocli;
-    syslog 'local0';
+    
+    nocli; # start without commands (start/stop)
+    
+    logging { # optional
+        my ($self,$detach) = @_;
+        Log::Any::Adapter->set('Easy',
+            $detach ? (
+                syslog => { ident => $self->name, facility => 'daemon' },
+            ):(
+                syslog => { ident => $self->name, facility => 'daemon' },
+                screen => 1
+            )
+        );
+        my $newlog = Log::Any->get_logger();
+        warn "setup logging $newlog";
+        $newlog;
+    };
 
     sub start { # before fork
         warn "$$ starting";
@@ -49,24 +64,26 @@ use strict;
 
 use Cwd;
 use FindBin;
+use Getopt::Long qw(:config gnu_compat bundling);
+use POSIX qw(WNOHANG);
+use Scalar::Util 'weaken';
 
 use Daemond::Lite::Conf;
-use Getopt::Long qw(:config gnu_compat bundling);
-
-use Data::Dumper;
-
-#use Daemond::Lite::Log '$log';
-use Log::Any '$log';
-BEGIN {
-		require Log::Any::Adapter;
-		Log::Any::Adapter->set('+Daemond::Lite::Log::AdapterScreen');
-}
-
+use Daemond::Lite::Log '$log';
 use Daemond::Lite::Daemonization;
 
-use Time::HiRes qw(time sleep);
-use POSIX qw(WNOHANG);
+use Time::HiRes qw(sleep time setitimer ITIMER_VIRTUAL);
+
 # TODO: sigtrap
+
+#our $endcb;
+#use Sys::Syslog( ':standard', ':macros' );
+#END {
+#	syslog(LOG_NOTICE, "$$ exiting...");
+#	$endcb && $endcb->();
+#}
+
+
 
 our $D;
 sub log : method { $log }
@@ -85,8 +102,9 @@ sub import {
 		no strict 'refs';
 		my $proto = prototype \&{ 'export_'.$m };
 		$proto = '@' unless defined $proto;
-		*{ $caller.'::'. $m } = eval qq{
-			sub ($proto) { &export_$m( \$D,\@_ ) };
+		#*{ $caller.'::'. $m } =
+		eval qq{
+			sub ${caller}::${m} ($proto) { \@_ = (\$D, \@_); goto &export_$m };
 		};
 	}
 }
@@ -97,36 +115,26 @@ use Daemond::Lite::Say;
 *warn = \&Daemond::Lite::Say::warn;
 *die  = \&Daemond::Lite::Say::die;
 
-=for rem
-sub die {
-	my $self = shift;
-	my $msg = "@_";
-	substr($msg,length $msg) = "\n"
-		if substr($msg,-1,1) ne "\x0a";
-	die ($msg);
+sub nosigdie {
+	local $SIG{__DIE__};
+	die shift, @_;
 }
-
-sub warn {
-	my $self = shift;
-	my $msg = "@_";
-	substr($msg,length $msg) = "\n"
-		if substr($msg,-1,1) ne "\x0a";
-	warn ($msg);
-}
-
-sub say {
-	my $self = shift;
-	my $msg = "@_";
-	substr($msg,length $msg) = "\n"
-		if substr($msg,-1,1) ne "\x0a";
-	print $self->{cf}{name}.': '.$msg;
-}
-
-=cut
 
 sub verbose { $_[0]{cf}{verbose} }
+sub exit_timeout { $_[0]{cf}{exit_timeout} || 10 }
 sub name    { $_[0]{src}{name} || $_[0]{cfg}{name} || $0 }
 sub is_parent { $_[0]{is_parent} }
+
+sub proc {
+	my $self = shift;
+	my $msg = "@_";
+	$msg =~ s{[\r\n]+}{}sg;
+	$0 = "<> ".$self->{cf}{name}." (".(
+		exists $self->{is_parent} ?
+			!$self->{is_parent} ? "child" : "master"
+			: "starting"
+	)."): $msg (perl)";
+}
 
 #### Export functions
 
@@ -139,14 +147,19 @@ sub export_nocli () {
 	shift->{src}{cli} = 0;
 }
 
-sub export_syslog($) {
-	warn "TODO: syslog";
-}
+#sub export_syslog($) {
+#	warn "TODO: syslog";
+#}
 
 sub export_config($) {
 	my $self = shift;
 	-e $_[0] or $self->die("No config file found: $_[0]\n");
 	$self->{config_file} = shift;
+}
+
+sub export_logging(&) {
+	my $self = shift;
+	$self->{logconfig} = shift;
 }
 
 sub export_children ($) {
@@ -159,15 +172,30 @@ sub export_pid ($) {
 	$self->{src}{pid} = shift;
 }
 
+
 sub export_runit () {
 	my $self = shift;
 	$self->configure;
+	if( $self->{logconfig} and my $newlog = ( delete $self->{logconfig} )->( $self, $self->{cf}{detach} ) ) {
+		Daemond::Lite::Log->set( $newlog );
+	} else {
+		Daemond::Lite::Log->configure( $self );
+	}
+	
+	$self->proc("configuring");
 	
 	if ($self->{cf}{cli}) {
-		warn "Running cli";
+		#warn "Running cli";
+		require Daemond::Lite::Cli;
+		$self->{cli} = Daemond::Lite::Cli->new(
+			d => $self,
+			pid => $self->{pid},
+		);
+		$self->{cli}->process();
+		#die "Not yet";
 	}
 	elsif ($self->{pid}) {
-		warn "Running only pid";
+		#warn "Running only pid";
 		if( $self->{pid}->lock ) {
 			# OK
 		} else {
@@ -185,25 +213,36 @@ sub export_runit () {
 		require Log::Any::Adapter;
 		Log::Any::Adapter->set('+Daemond::Lite::Log::AdapterScreen');
 	}
-	#$self->log->prefix("$$ PARENT: ");
-	$self->log->notice("starting...");
 	
-	warn "runit @_";
+	$self->log->prefix("M[$$]: ") if $self->log->can('prefix');
+	$self->log->notice("daemonizing...");
+	
+	#warn "runit @_";
 	
 	$self->{cf}{children} > 0 or $self->die("Need at least 1 child");
 	
 	Daemond::Lite::Daemonization->process( $self );
 	
+	$self->log->prefix("M[$$]: ") if $self->log->can('prefix');
+	
+	$self->log->notice("daemonized");
+	$self->proc("starting");
+	
+	$self->init_sig_handlers;
+	
 	$self->setup_signals;
 	$self->setup_scoreboard;
 	$self->{startup} = 1;
 	$self->{is_parent} = 1;
+	$self->proc("ready");
 	
 	
 	if (my $start = $self->{caller}->can('start')) {
 		$start->($self);
 	}
-	
+	my $grd = Daemond::Lite::Guard::guard {
+		$log->warn("Leaving parent scope");
+	};
 	while () {
 		#$self->d->proc->action('idle');
 		if ($self->{shutdown}) {
@@ -211,14 +250,118 @@ sub export_runit () {
 			#$self->d->proc->action('shutdown');
 			last;
 		}
-		$self->check_scoreboard;
+		my $update = $self->check_scoreboard;
+		if ( $update > 0 ) {
+			#$self->start_workers($update);
+			warn "spawn workers +$update" if $self->{verbose};
+			for(1..$update) {
+				$self->{forks}++;
+				if( $self->fork() ) {
+					#$self->log->debug("in parent: $new");
+				} else {
+					# mustn't be here
+					#$self->log->debug("in child");
+					return;
+				};
+			}
+		}
+		elsif ($update < 0) {
+			#DEBUG_SC and $self->diag("Killing %d",-$count);
+			warn "kill workers -$update" if $self->{verbose};
+			while ($update < 0) {
+				my ($pid,$data) = each %{ $self->{chld} };
+				kill TERM => $pid or $self->log->debug("killing $pid: $!");
+				$update++;
+			}
+		}
+		
+		
 		$self->idle or sleep 0.1;
 	}
+	
 	$self->shutdown();
 	return;
 }
 
 #### Export functions
+
+sub shorten_file($) {
+	my $n = shift;
+	for (@INC) {
+		$n =~ s{^\Q$_\E/}{INC:}s and last;
+	}
+	return $n;
+}
+
+sub init_sig_handlers {
+	my $self = shift;
+	my $oldsigdie = $SIG{__DIE__};
+	my $oldsigwrn = $SIG{__WARN__};
+	defined () and UNIVERSAL::isa($_, 'Daemond::Lite::SIGNAL') and undef $_ for ($oldsigdie, $oldsigwrn) ;
+=for rem
+	$SIG{__DIE__} = sub {
+		return if !defined $^S or $^S or $_[0] =~ m{ at \(eval \d+\) line \d+.\s*$};
+		$self->{shutdown} = $self->{die} = 1;
+		#print STDERR "Got inside sigdie ($^S) @_ ($^S) from @{[ (caller 0)[1,2] ]}\n";
+		my $msg = "@_";
+		my $trace = '';
+		my $i = 0;
+		while (my @c = caller($i++)) {
+			$trace .= "\t$c[3] at $c[1] line $c[2].\n";
+		}
+		if ( $self->log->is_null ) {
+			print STDERR $msg;
+		} else {
+			$self->log->error("$$: pp=%s, DIE: %s\n\t%s",getppid(),$msg,$trace);
+		}
+		goto &$oldsigdie if defined $oldsigdie;
+		exit( 255 );
+	};
+	bless ($SIG{__DIE__}, 'Daemond::Lite::SIGNAL');
+=cut
+	$SIG{__WARN__} = sub {
+		local *__ANON__ = "SIGWARN";
+		
+		if ($self and !$self->log->is_null) {
+			local $_ = "@_";
+			my ($file,$line);
+			s{\n+$}{}s;
+			#printf STDERR "sigwarn ".Dumper $_;
+			if ( m{\s+at\s+(.+?)\s+line\s+(\d+)\.?$}s ) {
+				($file,$line) = ($1,$2);
+				s{\s+at\s+(.+?)\s+line\s+(\d+)\.?$}{}s;
+			} else {
+				my @caller;my $i = 0;
+				my $at;
+				while (@caller = caller($i++)) {
+					if ($caller[1] =~ /\(eval.+?\)/) {
+						$at .= " at str$caller[1] line $caller[2] which";
+					}
+					else {
+						#$at .= " at $caller[1] line $caller[2].";
+						($file,$line) = @caller[1,2];
+						last;
+					}
+				}
+				#print STDERR "match: $at\n";
+				$_ .= $at;
+			}
+			$_ .= " at ".shorten_file($file)." line $line.";
+			$self->log->warning("$_");
+		}
+		elsif (defined $oldsigwrn) {
+			goto &$oldsigwrn;
+		}
+		else {
+			local $SIG{__WARN__};
+			local $Carp::Internal{'Daemond::Lite'} = 1;
+			Carp::carp("$$: @_");
+		}
+	};
+	bless ($SIG{__WARN__}, 'Daemond::Lite::SIGNAL');
+	return;
+}
+
 
 sub configure {
 	my $self = shift;
@@ -229,7 +372,7 @@ sub configure {
 	$self->merge_config();
 	if ($self->{cf}{pid}) {
 		require Daemond::Lite::Pid;
-		warn $self->{cf}{pid};
+		#warn $self->{cf}{pid};
 		$self->{cf}{pid} =~ s{%([nu])}{do{
 			if ($1 eq 'n') {
 				$self->{cf}{name} or $self->die("Can't assign '%n' into pid: Don't know daemon name");
@@ -242,7 +385,7 @@ sub configure {
 				'%'.$1;
 			}
 		}}sge;
-		warn $self->{cf}{pid};
+		#warn $self->{cf}{pid};
 		$self->{pid} = Daemond::Lite::Pid->new( file => $self->abs_path($self->{cf}{pid}) );
 		
 	}
@@ -358,7 +501,7 @@ sub merge_config {
 		signals => [qw(TERM INT QUIT HUP USR1 USR2)],
 	);
 	$self->{cf} = \%cf;
-	warn Dumper $self->{cf};
+	#warn Dumper $self->{cf};
 }
 
 sub usage {
@@ -437,6 +580,7 @@ sub setup_signals {
 			undef $old;
 		}
 		$SIG{$sig} = sub {
+			local *__ANON__ = "SIG$sig";
 			eval {
 				if ($self) {
 					$self->sig(@_);
@@ -447,7 +591,7 @@ sub setup_signals {
 		};
 		bless $SIG{$sig}, $mysig;
 	}
-	$SIG{CHLD} = sub { $self->SIGCHLD(@_) };
+	$SIG{CHLD} = sub { local *__ANON__ = "SIGCHLD"; $self->SIGCHLD(@_) };
 	$SIG{PIPE} = 'IGNORE' unless exists $SIG{PIPE};
 }
 
@@ -625,16 +769,7 @@ sub check_scoreboard {
 	}
 	
 	#$self->log->debug( "Update: %s",join ', ',map { "$_+$update{$_}" } keys %update ) if %update and $self->d->verbose > 1;
-	if ( $update > 0 ) {
-		$self->start_workers($update);
-	} else {
-		#DEBUG_SC and $self->diag("Killing %d",-$count);
-		while ($update < 0) {
-			my ($pid,$data) = each %{ $self->{chld} };
-			kill TERM => $pid or $self->log->debug("killing $pid: $!");
-			$update++;
-		}
-	}
+	return $update;
 }
 
 sub start_workers {
@@ -709,10 +844,10 @@ sub fork : method {
 		#DEBUG and $self->diag( "I'm forked child with slot $slot." );
 		#$self->log->prefix('CHILD F.'.$alias.':');
 		#$self->d->proc->info( state => FORKING, type => "child.$alias" );
-		$self->exec_child();
+		my $exec = $self->can('exec_child'); @_ = ($self, $slot); goto &$exec;
+		#$self->exec_child();
 		# must not reach here
 		exit 255;
-		
 	}
 	return;
 }
@@ -758,23 +893,38 @@ sub shutdown {
 
 
 sub idle {}
-
-sub setup_child_sig {
+sub stop {
 	my $self = shift;
-	$SIG{PIPE} = 'IGNORE';
-	$SIG{CHLD} = 'IGNORE';
-	my %sig = (
-		TERM => bless(sub {
-			warn "$$: term received"; 
+	if ($self->{is_parent}) {
+		
+	} else {
 			$self->{shutdown}++ and exit(1);
 			if( my $cb = $self->{caller}->can( 'stop' ) ) {
 				$cb->($self);
 			} else {
 				exit(0);
 			}
+	}
+}
+
+sub setup_child_sig {
+	weaken( my $self = shift );
+	$SIG{PIPE} = 'IGNORE';
+	$SIG{CHLD} = 'IGNORE';
+	
+	
+	my %sig = (
+		TERM => bless(sub {
+			local *__ANON__ = "SIGTERM";
+			warn "$$: term received"; 
+			$self->stop;
 		}, 'Daemond::Lite::SIGNAL'),
-		INT => bless(sub { warn "$$: sigint to child"; }, 'Daemond::Lite::SIGNAL'),
+		INT => bless(sub {
+			local *__ANON__ = "SIGINT";
+			warn "$$: sigint to child";
+		}, 'Daemond::Lite::SIGNAL'),
 	);
+	
 	if( my $cb = $self->{caller}->can( 'on_sig' ) ) {
 		for my $sig (keys %sig) {
 			$cb->($self, $sig, $sig{$sig});
@@ -784,11 +934,45 @@ sub setup_child_sig {
 			$SIG{$sig} = $sig{$sig};
 		}
 	}
+	
+	my $interval = 0.1;
+	
+	if ($INC{'EV.pm'}) {
+		my $w;$w = EV::timer( $interval,$interval,sub {
+			return undef $w if !$self or $self->{shutdown};
+			$self->check_parent;
+		} );
+	}
+	elsif ($INC{'AnyEvent.pm'}) {
+		my $w;$w = AE::timer( $interval,$interval,sub {
+			return undef $w if !$self or $self->{shutdown};
+			$self->check_parent;
+		} );
+	}
+	$SIG{VTALRM} = sub {
+			return delete $SIG{VTALRM} if !$self or $self->{shutdown};
+			$self->check_parent;
+			setitimer ITIMER_VIRTUAL, $interval, 0;
+	};
+	setitimer ITIMER_VIRTUAL, $interval, 0;
+	
+	return;
 }
 
+sub check_parent {
+	my $self = shift;
+	#return if kill 0, $self->{ppid};
+	return if kill 0, getppid();
+	$self->log->alert("I've lost my parent, stopping...");
+	$self->stop;
+}
 sub exec_child {
 	my $self = shift;
+	my $slot = shift;
+	$self->log->prefix("C${slot}[$$]: ") if $self->log->can('prefix');
 	$self->setup_child_sig;
+	$self->proc("ready");
+	
 	
 	eval {
 		if( my $cb = $self->{caller}->can( 'run' ) ) {
@@ -800,7 +984,7 @@ sub exec_child {
 	1} or do {
 		my $e = $@;
 		$self->log->error("Child error: $e");
-		die $e;
+		nosigdie $e;
 	};
 	exit;
 }

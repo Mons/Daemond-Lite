@@ -50,7 +50,7 @@ sub new {
 	$self->{file} or croak "Need args `file' and action";
 	my $do = delete $self->{action};
 	$self->{pidfile} = Cwd::abs_path(delete $self->{file});
-	warn "locking $self->{pidfile}";
+	#warn "locking $self->{pidfile}";
 	$self->{locked} = 0;
 	$self->{owner} = 0;
 	return $self;

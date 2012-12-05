@@ -3,11 +3,14 @@ package Daemond::Lite::Log::Object;
 use strict;
 use Carp;
 use Log::Any ();
+our %METHOD;
+BEGIN {
+	%METHOD = map { $_ => 1 } Log::Any->logging_methods(),Log::Any->logging_aliases;
+}
 
 sub new {
 	my $self = bless {}, shift;
 	$self->{log} = shift;
-	$self->{caller} = 1;
 	$self;
 }
 
@@ -17,10 +20,31 @@ sub is_null {
 	return ref $logger eq 'Log::Any::Adapter::Null' ? 1 : 0;
 }
 
-our %METHOD = map { $_ => 1 } Log::Any->logging_methods(),Log::Any->logging_aliases;
+
 sub prefix {
 	my $self = shift;
 	$self->{prefix} = shift;
+}
+
+sub syslogname {
+	my $self = shift;
+}
+
+BEGIN {
+	no strict 'refs';
+	for my $m (keys %METHOD) {
+		*$m = sub {
+			my $self = $_[0];
+			my $can = $self->{log}->can($m);
+			no warnings 'redefine';
+			*$m = sub {
+				my $self = $_[0];
+				@_ = ($self->{log}, $self->{prefix}.$_[1], @_ > 2 ? (@_[2..$#_]) : ());
+				goto &$can;
+			};
+			goto &$m;
+		};
+	}
 }
 
 our $AUTOLOAD;
@@ -31,10 +55,8 @@ sub  AUTOLOAD {
 	if ( exists $METHOD{$name} ) {
 		my $can = $self->{log}->can($name);
 		*$AUTOLOAD = sub {
-			warn "call $AUTOLOAD";
 			my $self = $_[0];
-			my ($file,$line) = (caller)[1,2];
-			@_ = ($self->{log}, $self->{prefix}.$_[1].($self->{caller} ? " [$file:$line]" : ''), @_ > 2 ? (@_[2..$#_]) : ());
+			@_ = ($self->{log}, $self->{prefix}.$_[1], @_ > 2 ? (@_[2..$#_]) : ());
 			goto &$can;
 		};
 		goto &$AUTOLOAD;
