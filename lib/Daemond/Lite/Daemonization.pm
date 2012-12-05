@@ -120,14 +120,14 @@ sub process {
 	};
 	local *CORE::GLOBAL::exit = sub (;$) {
 		$slog->("exit @_ called from @{[ (caller)[1,2] ]}");
-		goto &CORE::exit;
+		defined &CORE::exit ? goto &CORE::exit : CORE::exit($_[0]);
 	};
 	$proc->("instantiator");
 	
 	my $parent = $$;
 	defined( my $pid = fork ) or die "Could not fork: $!";
 	if ($pid) { # controlling terminal
-		*CORE::GLOBAL::exit = sub (;$) {goto &CORE::exit};
+		*CORE::GLOBAL::exit = sub (;$) { defined &CORE::exit ? goto &CORE::exit : CORE::exit($_[0]); };
 		$proc->("control");
 		select( (select(STDOUT),$|=1,select(STDERR),$|=1)[0] );
 		if ($self->{pid}) {
@@ -207,7 +207,7 @@ sub process {
 	# Make fork once again to fully detach from controller
 	defined( $pid = fork ) or die "Could not fork: $!";
 	if ($pid) {
-		*CORE::GLOBAL::exit = sub (;$) {goto &CORE::exit};
+		*CORE::GLOBAL::exit = sub (;$) { defined &CORE::exit ? goto &CORE::exit : CORE::exit($_[0]); };
 		#warn "forked 2 $pid";
 		$self->{pid}->forget if $self->{pid};
 		exit;
