@@ -14,7 +14,7 @@ BEGIN {
 	$SIG[0] = '';
 }
 BEGIN {
-	*CORE::GLOBAL::exit = sub (;$) {goto &CORE::exit;};
+	*CORE::GLOBAL::exit = sub (;$) { defined &CORE::exit ? goto &CORE::exit : CORE::exit($_[0]); };
 }
 our $on_end;
 END {
