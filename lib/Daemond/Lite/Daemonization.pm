@@ -45,7 +45,7 @@ sub process {
 		};
 		$slog = sub {
 			my $msg;
-			if (@_ > 1 and index $_[0], '%' > -1) {
+			if (@_ > 1 and index($_[0], '%') > -1) {
 				$msg = sprintf $_[0], @_[1..$#_];
 			} else {
 				$msg = "@_";
@@ -81,7 +81,7 @@ sub process {
 		close $r;
 		$slog = sub {
 			my $msg;
-			if (@_ > 1 and index $_[0], '%' > -1) {
+			if (@_ > 1 and index($_[0], '%') > -1) {
 				$msg = sprintf $_[0], @_[1..$#_];
 			} else {
 				$msg = "@_";
@@ -99,7 +99,7 @@ sub process {
 		 $slog = sub {
 			return if $Daemond::Lite::Tie::Handle::Interceptor;
 			my $msg;
-			if (@_ > 1 and index $_[0], '%' > -1) {
+			if (@_ > 1 and index( $_[0], '%')> -1) {
 				$msg = sprintf $_[0], @_[1..$#_];
 			} else {
 				$msg = "@_";
@@ -143,7 +143,7 @@ sub process {
 			$self->say("<y>waiting for $pid to gone</>..\0");
 			while(1) {
 				if( my $kid = waitpid $pid,WNOHANG ) {
-					my ($exitcode, $signal, $core) = ($? >> 8, $SIG[$? & 127] // ($? & 127), $? & 128);
+					my ($exitcode, $signal, $core) = ($? >> 8, $SIG[$? & 127] || ($? & 127), $? & 128);
 					if ($exitcode != 0 or $signal or $core) {
 						# Shit happens with our child
 						local $! = $exitcode;

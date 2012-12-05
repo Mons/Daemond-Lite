@@ -661,7 +661,7 @@ sub SIGINT {
 sub SIGCHLD {
 	my $self = shift;
 		while ((my $child = waitpid(-1,WNOHANG)) > 0) {
-			my ($exitcode, $signal, $core) = ($? >> 8, $SIG[$? & 127] // $? & 127, $? & 128);
+			my ($exitcode, $signal, $core) = ($? >> 8, $SIG[$? & 127] || $? & 127, $? & 128);
 			my $died;
 			if ($exitcode != 0) {
 				# Shit happens with our child

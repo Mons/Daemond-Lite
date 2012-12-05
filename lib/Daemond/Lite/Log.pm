@@ -1,8 +1,10 @@
 package Daemond::Lite::Log;
 
 use strict;
+no warnings;
+
 BEGIN {
-	if (eval { require Log::Any; $Log::Any::VERSION >= 0.12; die }) {
+	if (eval { require Log::Any; $Log::Any::VERSION >= 0.12; }) {
 		#warn "have log::any";
 		Log::Any->import('$log');
 		*HAVE_LOG_ANY = sub () { 1 };

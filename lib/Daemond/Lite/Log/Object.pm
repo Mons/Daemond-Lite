@@ -2,10 +2,27 @@ package Daemond::Lite::Log::Object;
 
 use strict;
 use Carp;
-use Log::Any ();
 our %METHOD;
 BEGIN {
-	%METHOD = map { $_ => 1 } Log::Any->logging_methods(),Log::Any->logging_aliases;
+	if (eval { require Log::Any; }) {
+		%METHOD = map { $_ => 1 } Log::Any->logging_methods(),Log::Any->logging_aliases;
+		*HAVE_LOG_ANY = sub () { 1 };
+	} else {
+		*HAVE_LOG_ANY = sub () { 0 };
+		our ( %log_level_aliases, @logging_methods, @logging_aliases );
+		BEGIN {
+			%log_level_aliases = (
+				inform => 'info',
+				warn   => 'warning',
+				err    => 'error',
+				crit   => 'critical',
+				fatal  => 'critical'
+			);
+			@logging_methods = qw(trace debug info notice warning error critical alert emergency);
+			@logging_aliases = keys(%log_level_aliases);
+		}
+		%METHOD = map { $_ => 1 } @logging_methods,@logging_aliases;
+	}
 }
 
 sub new {
@@ -16,6 +33,7 @@ sub new {
 
 sub is_null {
 	my $self = shift;
+	return 0 unless HAVE_LOG_ANY;
 	my $logger = Log::Any->get_logger( category => scalar caller() );
 	return ref $logger eq 'Log::Any::Adapter::Null' ? 1 : 0;
 }
