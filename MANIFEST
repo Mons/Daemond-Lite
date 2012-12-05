@@ -1,5 +1,6 @@
 Changes
 lib/Daemond/Lite.pm
+lib/Daemond/Lite/Cli.pm
 lib/Daemond/Lite/Conf.pm
 lib/Daemond/Lite/Daemonization.pm
 lib/Daemond/Lite/Helpers.pm
