@@ -58,7 +58,7 @@ Daemond::Lite - Lightweight version of daemonization toolkit
 
 =cut
 
-our $VERSION = '0.06';
+our $VERSION = '0.07';
 
 use strict;
 
@@ -153,8 +153,7 @@ sub export_nocli () {
 
 sub export_config($) {
 	my $self = shift;
-	-e $_[0] or $self->die("No config file found: $_[0]\n");
-	$self->{config_file} = shift;
+	$self->{src}{config_file} = shift;
 }
 
 sub export_logging(&) {
@@ -367,8 +366,17 @@ sub configure {
 	my $self = shift;
 	$self->{conf} = {};
 	$self->env_config;
-	$self->load_config;
 	$self->getopt_config;
+	my $cfg;
+	if (
+		defined ( $cfg = $self->{opt}{config_file} ) or
+		defined ( $cfg = $self->{src}{config_file} ) 
+	) {
+		$self->{config_file} = $cfg;
+		-e $cfg or $self->die("XXX No config file found: $cfg\n");
+		$self->load_config;
+	}
+	
 	$self->merge_config();
 	if ($self->{cf}{pid}) {
 		require Daemond::Lite::Pid;
@@ -422,8 +430,9 @@ sub getopt_config {
 		#max_die  => 10,
 	);
 	my %getopt = (
+		"config|c=s"      => sub { shift;$opts{config_file} = shift },
 		"nodetach|f!"       => sub { $opts{detach} = 0 },
-		"children|c=i"      => sub { shift;$opts{children} = shift },
+		"children|w=i"      => sub { shift;$opts{children} = shift },
 		"verbose|v+"        => sub { $opts{verbose}++ },
 		'exit-on-error|x=i' => sub { shift; $opts{max_die} = shift },
 		'pidfile|p=s'       => sub { shift; $opts{pidfile} = shift; },

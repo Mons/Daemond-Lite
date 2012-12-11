@@ -2,6 +2,9 @@ use 5.008008;
 use ExtUtils::MakeMaker;
 # See lib/ExtUtils/MakeMaker.pm for details of how to influence
 # the contents of the Makefile that is written.
+
+$ENV{AUTHOR} and require CPAN::Meta;
+
 WriteMakefile(
 	NAME              => 'Daemond::Lite',
 	VERSION_FROM      => 'lib/Daemond/Lite.pm', # finds $VERSION
