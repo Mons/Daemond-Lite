@@ -3,6 +3,7 @@ package Daemond::Lite::Log;
 use strict;
 no warnings;
 
+=for TODO
 BEGIN {
 	if (eval { require Log::Any; $Log::Any::VERSION >= 0.12; }) {
 		#warn "have log::any";
@@ -15,6 +16,12 @@ BEGIN {
 		require Daemond::Lite::Log::Simple;
 		*HAVE_LOG_ANY = sub () { 0 };
 	}
+}
+=cut
+BEGIN {
+	require Daemond::Lite::Log::Object;
+	require Daemond::Lite::Log::Simple;
+	*HAVE_LOG_ANY = sub () { 0 };
 }
 
 our $LOG;

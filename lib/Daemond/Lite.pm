@@ -16,6 +16,21 @@ Daemond::Lite - Lightweight version of daemonization toolkit
     
     nocli; # start without commands (start/stop)
     
+    getopt {
+        {
+            desc   => "My custom option",
+            eqdesc => "=myvalue",
+            getopt => "option|o=s",
+            setto  => sub { $_[0]{myopt1} = 1 }, # will be accessible via $self->{opt}{myopt1}
+        },
+        {
+            desc   => "My custom option 2",
+            eqdesc => "=mynumber",
+            getopt => "option|o=i",
+            setto  => sub { $_[0]{myopt2} = 1 }, # will be accessible via $self->{opt}{myopt2}
+        },
+    };
+    
     logging { # optional
         my ($self,$detach) = @_;
         Log::Any::Adapter->set('Easy',
@@ -30,6 +45,10 @@ Daemond::Lite - Lightweight version of daemonization toolkit
         warn "setup logging $newlog";
         $newlog;
     };
+    
+    sub check { # before detach, but after all configuration
+        warn "$$ checking";
+    }
 
     sub start { # before fork
         warn "$$ starting";
@@ -50,7 +69,7 @@ Daemond::Lite - Lightweight version of daemonization toolkit
         $self->{run} = 0;
     }
 
-    runit()
+    runit();
 
 =head1 DESCRIPTION
 
@@ -58,7 +77,7 @@ Daemond::Lite - Lightweight version of daemonization toolkit
 
 =cut
 
-our $VERSION = '0.07';
+our $VERSION = '0.08';
 
 use strict;
 
@@ -67,6 +86,7 @@ use FindBin;
 use Getopt::Long qw(:config gnu_compat bundling);
 use POSIX qw(WNOHANG);
 use Scalar::Util 'weaken';
+use Hash::Util qw( lock_keys unlock_keys );
 
 use Daemond::Lite::Conf;
 use Daemond::Lite::Log '$log';
@@ -90,10 +110,17 @@ sub log : method { $log }
 
 sub import {
 	my $pk = shift;
-	$D ||= bless {
-		env => {},
-		src => {},
-	}, $pk;
+	$D ||= do{
+		my $hash = {
+			env => {},
+			src => {},
+			opt => {},
+			cfg => {},
+		};
+		bless $hash, $pk;
+		lock_keys %$hash, qw(env src opt cfg cf caller logconfig cli pid config_file score startup shutdown dies forks chld is_parent this options detached);
+		$hash;
+	};
 	my $caller = caller;
 	$D->{caller} and $D->die("Duplicate call of $pk from $caller. Previous was from $D->{caller}");
 	$D->{caller} = $caller;
@@ -171,6 +198,11 @@ sub export_pid ($) {
 	$self->{src}{pid} = shift;
 }
 
+sub export_getopt(&) {
+	my $self = shift;
+	$self->{src}{options} = shift;
+}
+
 
 sub export_runit () {
 	my $self = shift;
@@ -204,17 +236,26 @@ sub export_runit () {
 	else {
 		$self->warn("No CLI, no PID. Beware!");
 	}
-	$self->say("<g>starting up</>... (pidfile = ".$self->abs_path( $self->{cf}{pid} ).", pid = <y>$$</>, detach = ".$self->{cf}{detach}.", log is null: ".$self->log->is_null.")");
+	$self->say("<g>starting up</>... (pidfile = ".$self->abs_path( $self->{cf}{pid} ).", pid = <y>$$</>, detach = ".$self->{cf}{detach}.")");
 	
 	if( $self->log->is_null ) {
-		#$self->d->warn("You are using null Log::Any. You will see no logs. Maybe you need to set up is with Log::Any::Adapter");
-		$self->warn("You are using null Log::Any. We just setup a simple screen adapter. Maybe you need to set it up with Log::Any::Adapter?");
+		$self->warn("You are using null Log::Any. We just setup a simple screen/syslog adapter. Maybe you need to set it up with Log::Any::Adapter?");
 		require Log::Any::Adapter;
 		Log::Any::Adapter->set('+Daemond::Lite::Log::AdapterScreen');
 	}
 	
+	if (my $check = $self->{caller}->can('check')) {
+		eval{
+			$check->($self);
+		1} or do {
+			my $e = $@;
+			$self->log->error("Check error: $e");
+			exit 255;
+			#nosigdie $e;
+		}
+	}
+	
 	$self->log->prefix("M[$$]: ") if $self->log->can('prefix');
-	$self->log->notice("daemonizing...");
 	
 	#warn "runit @_";
 	
@@ -240,7 +281,7 @@ sub export_runit () {
 		$start->($self);
 	}
 	my $grd = Daemond::Lite::Guard::guard {
-		$log->warn("Leaving parent scope");
+		$log->warn("Leaving parent scope") if $self->{is_parent};
 	};
 	while () {
 		#$self->d->proc->action('idle');
@@ -252,7 +293,7 @@ sub export_runit () {
 		my $update = $self->check_scoreboard;
 		if ( $update > 0 ) {
 			#$self->start_workers($update);
-			warn "spawn workers +$update" if $self->{verbose};
+			warn "spawn workers +$update" if $self->{cf}{verbose};
 			for(1..$update) {
 				$self->{forks}++;
 				if( $self->fork() ) {
@@ -266,7 +307,7 @@ sub export_runit () {
 		}
 		elsif ($update < 0) {
 			#DEBUG_SC and $self->diag("Killing %d",-$count);
-			warn "kill workers -$update" if $self->{verbose};
+			warn "kill workers -$update" if $self->{cf}{verbose};
 			while ($update < 0) {
 				my ($pid,$data) = each %{ $self->{chld} };
 				kill TERM => $pid or $self->log->debug("killing $pid: $!");
@@ -364,7 +405,6 @@ sub init_sig_handlers {
 
 sub configure {
 	my $self = shift;
-	$self->{conf} = {};
 	$self->env_config;
 	$self->getopt_config;
 	my $cfg;
@@ -423,34 +463,160 @@ sub load_config {
 
 sub getopt_config {
 	my $self = shift;
-	my %opts = (
-		#detach   => 1,
-		#children => 1,
-		#verbose  => 0,
-		#max_die  => 10,
-	);
-	my %getopt = (
-		"config|c=s"      => sub { shift;$opts{config_file} = shift },
-		"nodetach|f!"       => sub { $opts{detach} = 0 },
-		"children|w=i"      => sub { shift;$opts{children} = shift },
-		"verbose|v+"        => sub { $opts{verbose}++ },
-		'exit-on-error|x=i' => sub { shift; $opts{max_die} = shift },
-		'pidfile|p=s'       => sub { shift; $opts{pidfile} = shift; },
-	);
-	if (my $getopt = $self->{caller}->can('getopt')) {
-		my %add = $getopt->($self, \%opts);
-		for (keys %add) {
-			if (defined $add{$_}) {
-				$getopt{$_} = $add{$_};
-			} else {
-				delete $getopt{$_};
+	
+	$self->{options} = [
+		# name, description, getopt str, getopt sub, default
+		{
+			desc   => 'Print this help',
+			getopt => 'help|h!',
+			setto  => 'help',
+		},
+		{
+			desc   => 'Path to config file',
+			eqdesc => '=/path/to/config_file',
+			getopt => 'config|c=s',
+			setto  => 'config_file',
+		},
+		{
+			desc   => 'Verbosity level',
+			getopt => 'verbose|v+',
+			setto  => sub { $_[0]{verbose}++ },
+		},
+		{
+			desc   => "Don't detach from terminal",
+			getopt => 'nodetach|f!',
+			setto  => sub { $_[0]{detach} = 0 },
+		},
+		{
+			desc    => 'Count of child workers to spawn',
+			eqdesc  => '=count',
+			getopt  => 'workers|w=i',
+			setto   => 'children',
+			default => 1,
+		},
+		{
+			desc    => 'How many times child repeatedly should die to cause global terminations',
+			eqdesc  => '=count',
+			getopt  => 'exit-on-error|x=i',
+			setto   => 'max_die',
+			default => 10,
+		},
+		{
+			desc    => 'Path to pid file',
+			eqdesc  => '=/path/to/pid',
+			getopt  => 'pidfile|p=s',
+			setto   => 'pidfile',
+		},
+		#{
+		#	desc    => '',
+		#	eqdesc  => '',
+		#	getopt  => '',
+		#	setto   => '',
+		#},
+	];
+	if ($self->{src}{options}) {
+		push @{ $self->{options} }, $self->{src}{options}->($self);
+	}
+	my %opts;
+	my %getopt;
+	my %defs;my $i;
+	for my $opt (@{ $self->{options} }) {
+		my $idx = ++$i;
+		if (defined $opt->{default}) {
+			$defs{$idx} = $opt;
+		}
+		$getopt{ $opt->{getopt} } = sub {
+			shift;
+			delete $defs{$idx};
+			if (ref $opt->{setto}) {
+				$opt->{setto}->( \%opts,@_ );
+			}
+			else {
+				$opts{ $opt->{setto} } = shift;
 			}
 		}
 	}
-	my %defs = %opts;
-	GetOptions(%getopt) or $self->usage(\%getopt, \%defs); # TODO: defs
+	#use Data::Dumper;
+	#warn Dumper \%getopt;
+	GetOptions(%getopt) or $self->usage();
+	$opts{help} and $self->usage();
+	for my $opt (values %defs) {
+		if (ref $opt->{setto}) {
+			$opt->{setto}->( \%opts, $opt->{default} );
+		}
+		else {
+			$opts{ $opt->{setto} } = $opt->{default};
+		}
+	}
+	#warn Dumper \%opts;
 	$self->{opt} = \%opts;
 }
+
+sub usage {
+	my $self = shift;
+	my $opts = shift;
+	my $defs = shift;
+	$self->merge_config;
+	
+	print "Usage:\n\t$self->{env}{bin} [options]";
+	if ( $self->{cf}{cli} ) {
+		print " command";
+		print "\n\nCommands are:\n";
+		require Daemond::Lite::Cli;
+		
+		for my $cmd ( Daemond::Lite::Cli->commands ) {
+			my ($name,$desc) = @$cmd;
+			print "\t$name\n\t\t$desc\n";
+		}
+	}
+	print "\n\nOptions are:\n";
+	for my $opt (@{ $self->{options} }) {
+		my ($desc,$eqdesc,$go, $def) = @$opt{qw( desc eqdesc getopt default)};
+		my ($names) = $go =~ / ((?: \w+[-\w]* )(?: \| (?: \? | \w[-\w]* ) )*) /sx;
+		my %names; @names{ split /\|/, $names } = ();
+		my %opctl;
+		my ($name, $orig) = Getopt::Long::ParseOptionSpec ($go, \%opctl);
+		my $op = $opctl{$name}[0];
+		my $oplast;
+		my $first;
+		print "\t";
+		for ( sort { length $a <=> length $b } keys %opctl ) {
+			next if !exists $names{$_};;
+			print ", " if $first++;
+			if (length () > 1 ) {
+				print "--";
+			} else {
+				print "-";
+			}
+			print "$_";
+		}
+		if ($eqdesc) {
+			print "$eqdesc ";
+		} else {
+			if ($op eq 's') {
+				print "=VALUE";
+			}
+			elsif ($op eq 'i') {
+				print "=NUMBER";
+			}
+			elsif ($op eq '') {
+			}
+			else {
+				print " ($op)";
+			}
+		}
+		if (defined $def) {
+			print " [default = $def]";
+		}
+		if (length $desc) {
+			print "\n\t\t$desc";
+		}
+		
+		print "\n\n";
+	}
+	exit(255);
+}
+
 
 =for rem
 
@@ -513,67 +679,6 @@ sub merge_config {
 	#warn Dumper $self->{cf};
 }
 
-sub usage {
-	my $self = shift;
-	my $opts = shift;
-	my $defs = shift;
-	
-	$self->merge_config;
-	
-	print "Usage:\n\t$self->{env}{bin} [options]";
-	if ( $self->{cf}{cli} ) {
-		print " command";
-	}
-	print "\n\nOptions are:\n";
-	for ( sort keys %$opts ) {
-		my %opctl;
-		my ($names) = / ((?: \w+[-\w]* )(?: \| (?: \? | \w[-\w]* ) )*) /sx;
-		my %names; @names{ split /\|/, $names } = ();
-		my ($name, $orig) = Getopt::Long::ParseOptionSpec ($_, \%opctl);
-		#warn Dumper [$name, \%opctl];
-		print "\t";
-		my $op = $opctl{$name}[0];
-		my $oplast;
-		my $first;
-		for ( $name, grep $_ ne $name, keys %opctl ) {
-			next if !exists $names{$_};;
-			print " | " if $first++;
-			if (length () > 1 ) {
-				print "--";
-			} else {
-				print "-";
-			}
-			print "$_";
-			if ($op eq 's') {
-				print + (length()>1 ? '=value' : 'S' );
-			}
-			elsif ($op eq 'i') {
-				print + (length()>1 ? '=number' : 'X' );
-			}
-			elsif ($op eq '') {
-				#print "($op)";
-			}
-			else {
-				#print STDERR " ($opctl{$name}[0])";
-			}
-			
-			#print STDERR "$_";
-		}
-		if ($op eq 's' or $op eq 'i' or $op eq '') {
-		}
-		else {
-			print " ($op)";
-		}
-		if (exists $defs->{$name}) {
-			print " (default = $defs->{$name})";
-		}
-		print "\n\n";
-		#my ($name, $short, $type) = 
-		#print STDERR ""
-	}
-	
-	exit(255);
-}
 
 sub setup_signals {
 	my $self = shift;
@@ -677,18 +782,18 @@ sub SIGCHLD {
 				$died = 1;
 				{
 					local $! = $exitcode;
-					$self->log->alert("CHLD: child $child died with $exitcode ($!) (".($signal ? "sig: $signal, ":'')." core: $core)");
+					$self->log->alert("Child $child died with $exitcode ($!) (".($signal ? "sig: $signal, ":'')." core: $core)");
 				}
 			} else {
 				if ($signal || $core) {
 					{
 						local $! = $exitcode;
-						$self->log->alert("CHLD: child $child died with $signal (exit: $exitcode/$!, core: $core)");
+						$self->log->alert("Child $child died with $signal (exit: $exitcode/$!, core: $core)");
 					}
 				}
 				else {
 					# it's ok
-					$self->log->debug("CHLD: child $child normally gone");
+					$self->log->debug("Child $child normally gone");
 				}
 			}
 			my $pid = $child;
@@ -750,6 +855,7 @@ sub score_drop {
 sub check_scoreboard {
 	my $self = shift;
 	
+	#$self->proc("ready [$self->{score}]");
 	return if $self->{forks} > 0; # have pending forks
 
 	#DEBUG_SC and $self->diag($self->score->view." CHLD[@{[ map { qq{$_=$self->{chld}{$_}[0]} } $self->childs ]}]; forks=$self->{_}{forks}");
@@ -925,12 +1031,12 @@ sub setup_child_sig {
 	my %sig = (
 		TERM => bless(sub {
 			local *__ANON__ = "SIGTERM";
-			warn "$$: term received"; 
+			warn "SIGTERM received"; 
 			$self->stop;
 		}, 'Daemond::Lite::SIGNAL'),
 		INT => bless(sub {
 			local *__ANON__ = "SIGINT";
-			warn "$$: sigint to child";
+			warn "SIGINT to child. ignored";
 		}, 'Daemond::Lite::SIGNAL'),
 	);
 	

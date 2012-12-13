@@ -17,20 +17,15 @@ sub new {
 
 sub force_quit { shift->d->exit_timeout }
 
+sub commands {
+	[ 'start',    "Start the process", ],
+	[ 'stop',     "Stop the process", ],
+	[ 'restart',  "Restart the process", ],
+}
+
 sub usage {
 	my $self = shift;
-	my $cmd = $self->d->cmd;
-$self->d->sayn(<<EOF);
-<b><red>Usage: $cmd [options] [start|stop|restart|check]
-    Options:
-        -v,   --verbose        - increase verbosity level
-        -f,   --nodetach       - run in nodetach mode
-        -c N, --children N     - redefine count of children
-        -x N, --exit-on-error  - exit after N child errors
-</>
-EOF
-;
-	exit 255;
+	$self->d->usage;
 };
 
 sub process {

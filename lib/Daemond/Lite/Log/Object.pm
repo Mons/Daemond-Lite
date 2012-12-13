@@ -3,6 +3,8 @@ package Daemond::Lite::Log::Object;
 use strict;
 use Carp;
 our %METHOD;
+
+=for TODO
 BEGIN {
 	if (eval { require Log::Any; }) {
 		%METHOD = map { $_ => 1 } Log::Any->logging_methods(),Log::Any->logging_aliases;
@@ -24,6 +26,25 @@ BEGIN {
 		%METHOD = map { $_ => 1 } @logging_methods,@logging_aliases;
 	}
 }
+=cut
+
+BEGIN {
+		*HAVE_LOG_ANY = sub () { 0 };
+		our ( %log_level_aliases, @logging_methods, @logging_aliases );
+		BEGIN {
+			%log_level_aliases = (
+				inform => 'info',
+				warn   => 'warning',
+				err    => 'error',
+				crit   => 'critical',
+				fatal  => 'critical'
+			);
+			@logging_methods = qw(trace debug info notice warning error critical alert emergency);
+			@logging_aliases = keys(%log_level_aliases);
+		}
+		%METHOD = map { $_ => 1 } @logging_methods,@logging_aliases;
+}
+
 
 sub new {
 	my $self = bless {}, shift;

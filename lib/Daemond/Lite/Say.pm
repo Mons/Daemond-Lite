@@ -76,7 +76,7 @@ sub sayn {
 sub warn:method {
 	my $self = shift;
 	my $msg = shift;
-	$self->say('<r>'.$msg,@_);
+	$self->say('<y><b>'.$msg,@_);
 }
 
 sub die:method {
