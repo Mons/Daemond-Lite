@@ -77,7 +77,7 @@ Daemond::Lite - Lightweight version of daemonization toolkit
 
 =cut
 
-our $VERSION = '0.08';
+our $VERSION = '0.09';
 
 use strict;
 
@@ -195,7 +195,7 @@ sub export_children ($) {
 
 sub export_pid ($) {
 	my $self = shift;
-	$self->{src}{pid} = shift;
+	$self->{src}{pidfile} = shift;
 }
 
 sub export_getopt(&) {
@@ -236,7 +236,7 @@ sub export_runit () {
 	else {
 		$self->warn("No CLI, no PID. Beware!");
 	}
-	$self->say("<g>starting up</>... (pidfile = ".$self->abs_path( $self->{cf}{pid} ).", pid = <y>$$</>, detach = ".$self->{cf}{detach}.")");
+	$self->say("<g>starting up</>... (pidfile = ".$self->abs_path( $self->{cf}{pidfile} ).", pid = <y>$$</>, detach = ".$self->{cf}{detach}.")");
 	
 	if( $self->log->is_null ) {
 		$self->warn("You are using null Log::Any. We just setup a simple screen/syslog adapter. Maybe you need to set it up with Log::Any::Adapter?");
@@ -418,10 +418,10 @@ sub configure {
 	}
 	
 	$self->merge_config();
-	if ($self->{cf}{pid}) {
+	if ($self->{cf}{pidfile}) {
 		require Daemond::Lite::Pid;
 		#warn $self->{cf}{pid};
-		$self->{cf}{pid} =~ s{%([nu])}{do{
+		$self->{cf}{pidfile} =~ s{%([nu])}{do{
 			if ($1 eq 'n') {
 				$self->{cf}{name} or $self->die("Can't assign '%n' into pid: Don't know daemon name");
 			}
@@ -434,7 +434,7 @@ sub configure {
 			}
 		}}sge;
 		#warn $self->{cf}{pid};
-		$self->{pid} = Daemond::Lite::Pid->new( file => $self->abs_path($self->{cf}{pid}) );
+		$self->{pid} = Daemond::Lite::Pid->new( file => $self->abs_path($self->{cf}{pidfile}) );
 		
 	}
 	
@@ -645,9 +645,13 @@ sub _opt {
 		$src = shift;
 	}
 	my $def = shift;
+	#warn "searching $opt, default: $def";
 	for (@$src) {
 		if ( defined $self->{$_}{$opt} ) {
+			#warn "\tfound $opt in $_: $self->{$_}{$opt}";
 			return ( $opt => $self->{$_}{$opt} );
+		} else {
+			#warn "\tnot found $opt in $_";
 		}
 	}
 	if( defined $def ) {
@@ -661,6 +665,7 @@ sub _opt {
 sub merge_config {
 	my $self = shift;
 	#warn Dumper $self;
+	$self->{cfg}{pidfile} = delete $self->{cfg}{pid};
 	my %cf = (
 		$self->_opt( 'name', [qw(src cfg env)], $0 ), # TODO
 		
@@ -669,8 +674,8 @@ sub merge_config {
 		$self->_opt('detach',   1),
 		$self->_opt('max_die',  10),
 		
-		$self->_opt('cli', [qw(src cfg opt)], 1),
-		$self->_opt('pid'),
+		$self->_opt('cli', [qw(cfg src)], 1),
+		$self->_opt('pidfile', "/tmp/%n.%u.pid"),
 		
 		start_timeout => 10,
 		signals => [qw(TERM INT QUIT HUP USR1 USR2)],
