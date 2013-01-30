@@ -3,6 +3,7 @@ Revision history for Perl extension Daemond::Lite.
 0.09  30.01.2013
 	- Fixed default getopt
 	- Method option() for extracting user values from config/getopt
+	- Fix config/pid param from getopt to be relative to cwd, not binary
 
 0.08  12.12.2012
 	- Rewrite getopt.

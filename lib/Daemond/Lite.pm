@@ -476,7 +476,9 @@ sub getopt_config {
 			desc   => 'Path to config file',
 			eqdesc => '=/path/to/config_file',
 			getopt => 'config|c=s',
-			setto  => 'config_file',
+			setto  => sub {
+				$_[0]{config_file} = Cwd::abs_path($_[1]);
+			},
 		},
 		{
 			desc   => 'Verbosity level',
@@ -506,7 +508,9 @@ sub getopt_config {
 			desc    => 'Path to pid file',
 			eqdesc  => '=/path/to/pid',
 			getopt  => 'pidfile|p=s',
-			setto   => 'pidfile',
+			setto   => sub {
+				$_[0]{pidfile} = Cwd::abs_path($_[1]);
+			},
 		},
 		#{
 		#	desc    => '',
@@ -527,7 +531,6 @@ sub getopt_config {
 			$defs{$idx} = $opt;
 		}
 		$getopt{ $opt->{getopt} } = sub {
-			warn "call @_";
 			shift;
 			delete $defs{$idx};
 			if (ref $opt->{setto}) {
