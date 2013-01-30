@@ -12,6 +12,21 @@ SYNOPSIS
 
         nocli; # start without commands (start/stop)
 
+        getopt {
+        {
+            desc   => "My custom option",
+            eqdesc => "=myvalue",
+            getopt => "option|o=s",
+            setto  => sub { $_[0]{myopt1} = 1 }, # will be accessible via $self->{opt}{myopt1}
+        },
+        {
+            desc   => "My custom option 2",
+            eqdesc => "=mynumber",
+            getopt => "option|o=i",
+            setto  => sub { $_[0]{myopt2} = 1 }, # will be accessible via $self->{opt}{myopt2}
+        },
+        };
+
         logging { # optional
         my ($self,$detach) = @_;
         Log::Any::Adapter->set('Easy',
@@ -26,6 +41,10 @@ SYNOPSIS
         warn "setup logging $newlog";
         $newlog;
         };
+
+        sub check { # before detach, but after all configuration
+        warn "$$ checking";
+        }
 
         sub start { # before fork
         warn "$$ starting";
@@ -46,7 +65,7 @@ SYNOPSIS
         $self->{run} = 0;
         }
 
-        runit()
+        runit();
 
 DESCRIPTION
         Easy tool for creating daemons
@@ -63,11 +82,4 @@ COPYRIGHT & LICENSE
     This program is free software; you can redistribute it and/or modify it
     under the terms of either: the GNU General Public License as published
     by the Free Software Foundation; or the Artistic License.
-
-POD ERRORS
-    Hey! The above document had some coding errors, which are explained
-    below:
-
-    Around line 1008:
-        =back without =over
 

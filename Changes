@@ -1,5 +1,9 @@
 Revision history for Perl extension Daemond::Lite.
 
+0.09  30.01.2013
+	- Fixed default getopt
+	- Method option() for extracting user values from config/getopt
+
 0.08  12.12.2012
 	- Rewrite getopt.
 	- Temporary disable incomplete Log::Any support

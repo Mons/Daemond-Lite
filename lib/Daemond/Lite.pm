@@ -118,7 +118,7 @@ sub import {
 			cfg => {},
 		};
 		bless $hash, $pk;
-		lock_keys %$hash, qw(env src opt cfg cf caller logconfig cli pid config_file score startup shutdown dies forks chld is_parent this options detached);
+		lock_keys %$hash, qw(env src opt cfg def cf caller logconfig cli pid config_file score startup shutdown dies forks chld is_parent this options detached);
 		$hash;
 	};
 	my $caller = caller;
@@ -410,6 +410,7 @@ sub configure {
 	my $cfg;
 	if (
 		defined ( $cfg = $self->{opt}{config_file} ) or
+		#defined ( $cfg = $self->{def}{config_file} ) or # ???
 		defined ( $cfg = $self->{src}{config_file} ) 
 	) {
 		$self->{config_file} = $cfg;
@@ -526,6 +527,7 @@ sub getopt_config {
 			$defs{$idx} = $opt;
 		}
 		$getopt{ $opt->{getopt} } = sub {
+			warn "call @_";
 			shift;
 			delete $defs{$idx};
 			if (ref $opt->{setto}) {
@@ -540,16 +542,18 @@ sub getopt_config {
 	#warn Dumper \%getopt;
 	GetOptions(%getopt) or $self->usage();
 	$opts{help} and $self->usage();
+	my %def;
 	for my $opt (values %defs) {
 		if (ref $opt->{setto}) {
-			$opt->{setto}->( \%opts, $opt->{default} );
+			$opt->{setto}->( \%def, $opt->{default} );
 		}
 		else {
-			$opts{ $opt->{setto} } = $opt->{default};
+			$def{ $opt->{setto} } = $opt->{default};
 		}
 	}
 	#warn Dumper \%opts;
 	$self->{opt} = \%opts;
+	$self->{def} = \%def;
 }
 
 sub usage {
@@ -640,7 +644,7 @@ sub is_defined(@) {
 sub _opt {
 	my $self = shift;
 	my $opt = shift;
-	my $src = [ qw(opt cfg src) ];
+	my $src = [ qw(opt cfg def src) ];
 	if (@_ and ref $_[0]) {
 		$src = shift;
 	}
@@ -661,6 +665,17 @@ sub _opt {
 		()
 	}
 }
+*option = \&_opt;
+
+# Generic logic of resolving options:
+# env - environment options (cwd, bin, ...)
+# cfg - data from config
+# opt - data from getopt
+# def - default value (
+# 1. Parse getopt
+# 2. Remember defs from getopt
+# 3. 
+
 
 sub merge_config {
 	my $self = shift;
@@ -1116,7 +1131,6 @@ sub call_stop {
 
 1;
 __END__
-=back
 
 =head1 AUTHOR
 
