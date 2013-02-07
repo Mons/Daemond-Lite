@@ -32,7 +32,11 @@ sub process {
 	my $name = $self->{cf}{name};
 	
 	my $proc = sub {
-		$0 = "<> $name: @_ (perl)";
+		$0 = "<> $name".(
+		length $self->{cf}{identifier}
+			? " [$self->{cf}{identifier}]"
+			: ""
+		).": @_ (perl)";
 	};
 	my $slog;
 	

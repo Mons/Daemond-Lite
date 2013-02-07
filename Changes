@@ -1,5 +1,8 @@
 Revision history for Perl extension Daemond::Lite.
 
+0.10  07.02.2013
+	- Added identification string to proc
+
 0.09  30.01.2013
 	- Fixed default getopt
 	- Method option() for extracting user values from config/getopt

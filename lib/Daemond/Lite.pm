@@ -77,7 +77,7 @@ Daemond::Lite - Lightweight version of daemonization toolkit
 
 =cut
 
-our $VERSION = '0.09';
+our $VERSION = '0.10';
 
 use strict;
 
@@ -156,11 +156,15 @@ sub proc {
 	my $self = shift;
 	my $msg = "@_";
 	$msg =~ s{[\r\n]+}{}sg;
-	$0 = "<> ".$self->{cf}{name}." (".(
+	$0 = "<> ".$self->{cf}{name}.(
+		length $self->{cf}{identifier}
+			? " [$self->{cf}{identifier}]"
+			: ""
+	)." (".(
 		exists $self->{is_parent} ?
 			!$self->{is_parent} ? "child" : "master"
 			: "starting"
-	)."): $msg (perl)";
+	).")".": $msg (perl)";
 }
 
 #### Export functions
@@ -827,7 +831,7 @@ sub SIGCHLD {
 					if ($died) {
 						$self->{dies}++;
 						if ( $self->{cf}{max_die} > 0 and $self->{dies} + 1 > ( $self->{cf}{max_die} ) * $self->{cf}{children} ) {
-							$self->log->critical("Children repeatedly died %d times, stopping",$self->{_}{dies});
+							$self->log->critical("Children repeatedly died %d times, stopping",$self->{dies});
 							$self->shutdown(); # TODO: stop
 						}
 					} else {
