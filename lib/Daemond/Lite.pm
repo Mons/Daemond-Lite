@@ -77,7 +77,7 @@ Daemond::Lite - Lightweight version of daemonization toolkit
 
 =cut
 
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 
 use strict;
 

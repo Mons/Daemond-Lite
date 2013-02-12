@@ -1,5 +1,8 @@
 Revision history for Perl extension Daemond::Lite.
 
+0.11  12.02.2013
+	- Fixed syslog die on unicode
+
 0.10  07.02.2013
 	- Added identification string to proc
 

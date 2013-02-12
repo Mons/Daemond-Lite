@@ -84,16 +84,20 @@ BEGIN {
 			}
 			$msg =~ s{\n*$}{};
 			if ($self->{screen}) {
+				unless ($self->{outfh}) {
+					open $self->{outfh}, '>&',STDOUT;
+					binmode $self->{outfh},':raw';
+				}
 				{
 					no warnings 'utf8';
-					if (-t STDOUT) {
-						print STDOUT "\e[".( $COLOR{$method} || 0 )."m";
+					if (-t $self->{outfh}) {
+						print {$self->{outfh}} "\e[".( $COLOR{$method} || 0 )."m";
 					}
-					print STDOUT "[".uc( substr($method,0,4) )."] ".$msg;
-					if (-t STDOUT) {
-						print STDOUT "\e[0m";
+					print {$self->{outfh}} "[".uc( substr($method,0,4) )."] ".$msg;
+					if (-t $self->{outfh}) {
+						print {$self->{outfh}} "\e[0m";
 					}
-					print STDOUT "\n";
+					print {$self->{outfh}} "\n";
 				}
 			}
 			if (SYSLOG and $self->{syslog}) {
@@ -101,7 +105,12 @@ BEGIN {
 					$self->{syslogopened} = 1;
 					openlog( $self->{d}->name, 0, LOG_DAEMON() );
 				}
-				syslog( $MAP{ lc($method) } || $MAP{warning}, (exists $MAP{lc $method} ? '': "[$method] ")."%s", $msg );
+				my $message = (exists $MAP{lc $method} ? '': "[$method] ").$msg;
+				utf8::encode $message if utf8::is_utf8 $message;
+				local $@;
+				eval {
+					syslog( $MAP{ lc($method) } || $MAP{warning}, $message );
+				};
 			}
 		};
 		for( @logging_aliases ) {

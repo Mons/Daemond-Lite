@@ -55,6 +55,7 @@ sub process {
 				$msg = "@_";
 			}
 			$msg =~ s{\n+$}{}s;
+			utf8::encode $msg if utf8::is_utf8 $msg;
 			Sys::Syslog::syslog( Sys::Syslog::LOG_WARNING(), "%s", $msg );
 			return if $Daemond::Lite::Tie::Handle::Interceptor;
 			eval { printf STDERR $msg; };
