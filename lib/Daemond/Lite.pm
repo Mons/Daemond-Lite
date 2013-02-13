@@ -77,7 +77,7 @@ Daemond::Lite - Lightweight version of daemonization toolkit
 
 =cut
 
-our $VERSION = '0.11';
+our $VERSION = '0.12';
 
 use strict;
 
@@ -118,7 +118,7 @@ sub import {
 			cfg => {},
 		};
 		bless $hash, $pk;
-		lock_keys %$hash, qw(env src opt cfg def cf caller logconfig cli pid config_file score startup shutdown dies forks chld is_parent this options detached);
+		lock_keys %$hash, qw(env src opt cfg def cf slot caller logconfig cli pid config_file score startup shutdown dies forks chld is_parent this options detached);
 		$hash;
 	};
 	my $caller = caller;
@@ -132,7 +132,16 @@ sub import {
 		#*{ $caller.'::'. $m } =
 		eval qq{
 			sub ${caller}::${m} ($proto) { \@_ = (\$D, \@_); goto &export_$m };
-		};
+			1;
+		} or die;
+	}
+	for my $m (qw(log)) {
+		my $log = $D->log;
+		eval qq{
+			sub ${caller}::${m} :method { \$log };
+			1;
+		} or die;
+		
 	}
 }
 
@@ -769,7 +778,7 @@ sub SIGTERM {
 	unless ($self->is_parent) {
 		if($self->{shutdown}) {
 			$self->log->warn("Received TERM during shutdown, force exit");
-			exit(1);
+			exit(Errno::EINTR);
 		} else {
 			$self->log->warn("Received TERM...");
 		}
@@ -779,7 +788,7 @@ sub SIGTERM {
 	if($self->{shutdown}) {
 		$self->log->warn("Received TERM during shutdown, force exit");
 		kill KILL => -$_,$_ for $self->childs;
-		exit 1;
+		exit Errno::EINTR;
 	}
 	$self->log->warn("Received TERM, shutting down");
 	$self->{shutdown} = 1;
@@ -796,6 +805,16 @@ sub SIGTERM {
 
 sub SIGINT {
 	my $self = shift;
+	if ($self->{shutdown}) {
+		my %chld = %{$self->{chld}};
+		my $sig = $self->{shutdown} < 3 ? 'TERM' : 'KILL';
+		if ( $self->{chld} and %chld  ) {
+			# tell children once again!
+			$self->log->debug("Again ${sig}'ing children [@{[ keys %chld ]}]");
+			kill $sig => $_ or $self->error("Killing $_ failed: $!") for keys %chld;
+		}
+		
+	}
 	$self->{shutdown} = 1;
 }
 
@@ -1111,6 +1130,8 @@ sub check_parent {
 sub exec_child {
 	my $self = shift;
 	my $slot = shift;
+	delete $self->{chld};
+	$self->{slot} = $slot;
 	$self->log->prefix("C${slot}[$$]: ") if $self->log->can('prefix');
 	$self->setup_child_sig;
 	$self->proc("ready");

@@ -84,20 +84,21 @@ BEGIN {
 			}
 			$msg =~ s{\n*$}{};
 			if ($self->{screen}) {
-				unless ($self->{outfh}) {
-					open $self->{outfh}, '>&',STDOUT;
-					binmode $self->{outfh},':raw';
-				}
+				#unless ($self->{outfh}) {
+				#	open $self->{outfh}, '>&',STDOUT;
+				#	binmode $self->{outfh},':raw';
+				#}
+				binmode STDOUT,':raw';
 				{
 					no warnings 'utf8';
-					if (-t $self->{outfh}) {
-						print {$self->{outfh}} "\e[".( $COLOR{$method} || 0 )."m";
+					if (-t STDOUT) {
+						print STDOUT "\e[".( $COLOR{$method} || 0 )."m";
 					}
-					print {$self->{outfh}} "[".uc( substr($method,0,4) )."] ".$msg;
-					if (-t $self->{outfh}) {
-						print {$self->{outfh}} "\e[0m";
+					print STDOUT "[".uc( substr($method,0,4) )."] ".$msg;
+					if (-t STDOUT) {
+						print STDOUT "\e[0m";
 					}
-					print {$self->{outfh}} "\n";
+					print STDOUT "\n";
 				}
 			}
 			if (SYSLOG and $self->{syslog}) {

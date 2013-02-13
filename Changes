@@ -1,5 +1,9 @@
 Revision history for Perl extension Daemond::Lite.
 
+0.12  13.02.2013
+	- Added child slot info
+	- Remove duplication&keep of stdout
+
 0.11  12.02.2013
 	- Fixed syslog die on unicode
 
