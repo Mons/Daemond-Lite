@@ -28,7 +28,7 @@ BEGIN {
 
 sub load {
 	my $file = shift;
-	#warn "loading YAML $file";
+	warn "loading YAML $file";
 	open my $f,'<:raw', $file or die "Can't open file `$file': $!\n";
 	local $/;
 	my $data = <$f>;
@@ -86,7 +86,56 @@ sub parse_ini {
 sub parse_yaml {
 	HAVE_YAML or die "Neither YAML::Syck, nor YAML::XS nor YAML found. Use INI config file or install some YAML module\n";
 	my $file = shift;
-	return Load(${$_[0]});
+	my $data = ${$_[0]};
+	if ( $data =~ /\n[^"'\n]*: !include\s[^"'\n]+\n/s ) {
+		require File::Basename;
+		require Daemond::Lite::Conf::YAML;
+		my ($name, $path) = File::Basename::fileparse($file);
+		return clone( Daemond::Lite::Conf::YAML->new($path)->load($data) );
+	}
+	return Load($data);
+}
+
+my %SEEN;
+sub clone($);
+sub clone($) {
+	my $ref = shift;
+	exists $SEEN{0+$ref} and warn("return seen $ref: $SEEN{0+$ref}"),return $SEEN{0+$ref};
+	local $SEEN{0+$ref};
+	if ( UNIVERSAL::isa( $ref, 'HASH' ) ) {
+		$SEEN{0+$ref} = my $new = {};
+		%$new = map { ref() ? clone($_) : $_ } %$ref;
+		bless $new, ref $ref if ref $ref ne 'HASH';
+		return $new;
+	}
+	elsif ( UNIVERSAL::isa( $ref, 'ARRAY' ) ) {
+		$SEEN{0+$ref} = my $new = [];
+		@$new = map { ref() ? clone($_) : $_ } @$ref;
+		bless $new, ref $ref if ref $ref ne 'ARRAY';
+		return $new;
+	}
+	elsif ( UNIVERSAL::isa( $ref, 'SCALAR' ) ) {
+		my $copy = $$ref;
+		$SEEN{0+$ref} = my $new = \$copy;
+		bless $new, ref $ref if ref $ref ne 'SCALAR';
+		return $new;
+	}
+	elsif ( UNIVERSAL::isa( $ref, 'REF' ) ) {
+		my $copy;
+		$SEEN{0+$ref} = my $new = \$copy;
+		$copy = clone( $$ref );
+		bless $new, ref $ref if ref $ref ne 'REF';
+		return $new;
+	}
+	elsif ( UNIVERSAL::isa( $ref, 'LVALUE' ) ) {
+		my $copy = $$ref;
+		my $new = \$copy;
+		bless $new, ref $ref if ref $ref ne 'LVALUE';
+		return $new;
+	}
+	else {
+		die "Cloning of ".ref( $ref )." not supported";
+	}
 }
 
 1;
