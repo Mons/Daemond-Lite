@@ -77,7 +77,7 @@ Daemond::Lite - Lightweight version of daemonization toolkit
 
 =cut
 
-our $VERSION = '0.13';
+our $VERSION = '0.14';
 
 use strict;
 
@@ -108,6 +108,7 @@ use Time::HiRes qw(sleep time setitimer ITIMER_VIRTUAL);
 our $D;
 sub log : method { $log }
 
+sub import_ext {}
 sub import {
 	my $pk = shift;
 	$D ||= do{
@@ -118,7 +119,7 @@ sub import {
 			cfg => {},
 		};
 		bless $hash, $pk;
-		lock_keys %$hash, qw(env src opt cfg def cf slot caller logconfig cli pid config_file score startup shutdown dies forks chld is_parent this options detached);
+		lock_keys %$hash, qw(env src opt cfg def cf slot caller logconfig cli pid config_file score startup shutdown dies forks chld is_parent this options detached watchers);
 		$hash;
 	};
 	my $caller = caller;
@@ -143,6 +144,7 @@ sub import {
 		} or die;
 		
 	}
+	$D->import_ext;
 }
 
 use Daemond::Lite::Say;
@@ -257,16 +259,8 @@ sub export_runit () {
 		Log::Any::Adapter->set('+Daemond::Lite::Log::AdapterScreen');
 	}
 	
-	if (my $check = $self->{caller}->can('check')) {
-		eval{
-			$check->($self);
-		1} or do {
-			my $e = $@;
-			$self->log->error("Check error: $e");
-			exit 255;
-			#nosigdie $e;
-		}
-	}
+	
+	$self->run_check;
 	
 	$self->log->prefix("M[$$]: ") if $self->log->can('prefix');
 	
@@ -290,9 +284,8 @@ sub export_runit () {
 	$self->proc("ready");
 	
 	
-	if (my $start = $self->{caller}->can('start')) {
-		$start->($self);
-	}
+	$self->run_start;
+	
 	my $grd = Daemond::Lite::Guard::guard {
 		$log->warn("Leaving parent scope") if $self->{is_parent};
 	};
@@ -337,6 +330,37 @@ sub export_runit () {
 }
 
 #### Export functions
+
+sub run_check {
+	my $self = shift;
+	if (my $check = $self->{caller}->can('check')) {
+		eval{
+			$check->($self);
+		1} or do {
+			my $e = $@;
+			$self->log->error("Check error: $e");
+			exit 255;
+			#nosigdie $e;
+		}
+	}
+}
+
+sub run_start {
+	my $self = shift;
+	if (my $start = $self->{caller}->can('start')) {
+		$start->($self);
+	}
+}
+
+sub run_run {
+	my $self = shift;
+	if( my $cb = $self->{caller}->can( 'run' ) ) {
+		$cb->($self);
+		$self->log->notice("Child $$ correctly finished");
+	} else {
+		die "Whoa! no run at start!";
+	}
+}
 
 sub shorten_file($) {
 	my $n = shift;
@@ -1086,29 +1110,44 @@ sub setup_child_sig {
 		}, 'Daemond::Lite::SIGNAL'),
 	);
 	
+	my $usersig;
 	if( my $cb = $self->{caller}->can( 'on_sig' ) ) {
+		$usersig = 1;
 		for my $sig (keys %sig) {
 			$cb->($self, $sig, $sig{$sig});
-		}
-	} else {
-		for my $sig (keys %sig) {
-			$SIG{$sig} = $sig{$sig};
 		}
 	}
 	
 	my $interval = 0.1;
 	
 	if ($INC{'EV.pm'}) {
-		my $w;$w = EV::timer( $interval,$interval,sub {
-			return undef $w if !$self or $self->{shutdown};
+		$self->{watchers}{pcheck} = EV::timer( $interval,$interval,sub {
+			return if !$self or $self->{shutdown};
 			$self->check_parent;
 		} );
+		if (!$usersig) {
+			for my $sig (keys %sig) {
+				$self->{watchers}{sig}{$sig} = EV::signal $sig => $sig{$sig};
+			}
+			
+		}
 	}
 	elsif ($INC{'AnyEvent.pm'}) {
-		my $w;$w = AE::timer( $interval,$interval,sub {
-			return undef $w if !$self or $self->{shutdown};
+		$self->{watchers}{pcheck} = AE::timer( $interval,$interval,sub {
+			return if !$self or $self->{shutdown};
 			$self->check_parent;
 		} );
+		if (!$usersig) {
+			for my $sig (keys %sig) {
+				$self->{watchers}{sig}{$sig} = AE::signal $sig => $sig{$sig};
+			}
+			
+		}
+	}
+	else {
+		for my $sig (keys %sig) {
+			$SIG{$sig} = $sig{$sig};
+		}
 	}
 	$SIG{VTALRM} = sub {
 			return delete $SIG{VTALRM} if !$self or $self->{shutdown};
@@ -1138,12 +1177,7 @@ sub exec_child {
 	
 	
 	eval {
-		if( my $cb = $self->{caller}->can( 'run' ) ) {
-			$cb->($self);
-			$self->log->notice("Child $$ correctly finished");
-		} else {
-			die "Whoa! no run at start!";
-		}
+		$self->run_run;
 	1} or do {
 		my $e = $@;
 		$self->log->error("Child error: $e");

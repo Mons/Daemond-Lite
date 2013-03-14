@@ -28,7 +28,7 @@ BEGIN {
 
 sub load {
 	my $file = shift;
-	warn "loading YAML $file";
+	#warn "loading YAML $file";
 	open my $f,'<:raw', $file or die "Can't open file `$file': $!\n";
 	local $/;
 	my $data = <$f>;
