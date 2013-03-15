@@ -1,6 +1,7 @@
 package Daemond::Lite::Log::Object;
 
 use strict;
+no warnings 'uninitialized';
 use Carp;
 our %METHOD;
 

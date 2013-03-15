@@ -926,13 +926,13 @@ sub check_scoreboard {
 	my $self = shift;
 	
 	#$self->proc("ready [$self->{score}]");
-	return if $self->{forks} > 0; # have pending forks
+	return 0 if $self->{forks} > 0; # have pending forks
 
 	#DEBUG_SC and $self->diag($self->score->view." CHLD[@{[ map { qq{$_=$self->{chld}{$_}[0]} } $self->childs ]}]; forks=$self->{_}{forks}");
 	
 	my $count = $self->{cf}{children};
 	my $check = 0;
-	my $update;
+	my $update = 0;
 	while( my ($pid, $data) = each %{ $self->{chld} } ) {
 		my ($slot) = @$data;
 		if (kill 0 => $pid) {
@@ -1127,7 +1127,7 @@ sub setup_child_sig {
 		} );
 		if (!$usersig) {
 			for my $sig (keys %sig) {
-				$self->{watchers}{sig}{$sig} = EV::signal $sig => $sig{$sig};
+				$self->{watchers}{sig}{$sig} = &EV::signal( $sig => $sig{$sig} );
 			}
 			
 		}
@@ -1139,7 +1139,7 @@ sub setup_child_sig {
 		} );
 		if (!$usersig) {
 			for my $sig (keys %sig) {
-				$self->{watchers}{sig}{$sig} = AE::signal $sig => $sig{$sig};
+				$self->{watchers}{sig}{$sig} = &AE::signal( $sig => $sig{$sig} );
 			}
 			
 		}
