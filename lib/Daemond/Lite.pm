@@ -80,12 +80,14 @@ Daemond::Lite - Lightweight version of daemonization toolkit
 our $VERSION = '0.14';
 
 use strict;
+no warnings 'uninitialized';
 
 use Cwd;
 use FindBin;
 use Getopt::Long qw(:config gnu_compat bundling);
 use POSIX qw(WNOHANG);
 use Scalar::Util 'weaken';
+use Fcntl ();
 use Hash::Util qw( lock_keys unlock_keys );
 
 use Daemond::Lite::Conf;
@@ -119,7 +121,7 @@ sub import {
 			cfg => {},
 		};
 		bless $hash, $pk;
-		lock_keys %$hash, qw(env src opt cfg def cf slot caller logconfig cli pid config_file score startup shutdown dies forks chld is_parent this options detached watchers);
+		lock_keys %$hash, qw(env src opt cfg def cf slot caller logconfig cli pid config_file score startup shutdown dies forks chld chpipes chpipe is_parent this options detached watchers);
 		$hash;
 	};
 	my $caller = caller;
@@ -142,7 +144,6 @@ sub import {
 			sub ${caller}::${m} :method { \$log };
 			1;
 		} or die;
-		
 	}
 	$D->import_ext;
 }
@@ -160,6 +161,7 @@ sub nosigdie {
 
 sub verbose { $_[0]{cf}{verbose} }
 sub exit_timeout { $_[0]{cf}{exit_timeout} || 10 }
+sub check_timeout { $_[0]{cf}{check_timeout} || 10 }
 sub name    { $_[0]{src}{name} || $_[0]{cfg}{name} || $0 }
 sub is_parent { $_[0]{is_parent} }
 
@@ -227,6 +229,15 @@ sub export_runit () {
 	} else {
 		Daemond::Lite::Log->configure( $self );
 	}
+	{
+		no warnings 'redefine';
+		my $log = $D->log;
+		eval qq{
+			sub $self->{caller}::log :method { \$log };
+			1;
+		} or die;
+	}
+	
 	
 	$self->proc("configuring");
 	
@@ -938,12 +949,75 @@ sub check_scoreboard {
 		if (kill 0 => $pid) {
 			# child alive
 			$check++;
+			kill USR2 => $pid;
 		} else {
 			$self->log->critical("child $pid, slot $slot exited without notification? ($!)");
 			delete $self->{chld}{$pid};
 			$self->score_drop($slot);
 		}
 	}
+	my $at = time;
+	while( my ($pid, $data) = each %{ $self->{chld} } ) {
+		my ($slot,$pipe,$rbuf) = @$data;
+		my $r = sysread $pipe, $$rbuf, 4096, length $$rbuf;
+		if ($r) {
+			#warn "received $r for $slot";
+			my $ix = 0;
+			while () {
+				last if length $$rbuf < $ix + 8;
+				my ($type,$l) = unpack 'VV', substr($$rbuf,$ix,8);
+				if ( length($rbuf) - $ix >= 8 + $l ) {
+					if ($type == 0) {
+						# pong packet
+						my $x = substr($$rbuf,$ix+8,$l);
+						if ($x != $slot) {
+							warn "Mess-up in pong packet for slot $slot. Got $x";
+						}
+						$data->[3] = $at;
+					}
+					else {
+						warn "unknown type $type";
+					}
+					$ix += 8+$l;
+				}
+				else {
+					last;
+				}
+			}
+			
+		}
+		elsif (!defined $r) {
+			redo if $! == Errno::EINTR;
+			next if $! == Errno::EAGAIN;
+			warn "read failed: $!";
+		}
+		else {
+			warn "Child closed the pipe???";
+		}
+	}
+	#warn sprintf "Spent %0.4fs for reading\n", time - $at;
+	my $tm = $self->check_timeout;
+	while( my ($pid, $data) = each %{ $self->{chld} } ) {
+		my ($slot,$pipe,$rbuf,$last,$killing) = @$data;
+		if (!$killing) {
+			if ( time - $last > $tm ) {
+				$self->log->error("Child $slot (pid:$pid) Not responding for %.0fs. Terming", time - $last  );
+				$data->[4]++;
+				warn "send TERM $pid";
+				kill TERM => $pid or do{
+					$self->log->warn( "kill TERM $pid failed: $!. Using KILL" );
+					kill KILL => $pid;
+				};
+			}
+		}
+		else {
+			if ( time - $last > $tm*2 ) {
+				$self->log->error("Child $slot (pid:$pid) Not exited for %.0fs. Killing", time - $last  );
+				kill KILL => $pid;
+			}
+		}
+	}
+	
 	#warn "check: $check/$count is alive";
 	#$self->log->debug( "Current childs: %s",$self->dumper(\%check) );
 	
@@ -997,8 +1071,8 @@ sub fork : method {
 		return;
 	}
 	
-	# TODO!!!
-	#pipe my $rh, my $wh or die "Watch pipe failed: $!";
+	pipe my $rh, my $wh or die "Watch pipe failed: $!";
+	fcntl $_, Fcntl::F_SETFL, Fcntl::O_NONBLOCK for $rh,$wh;
 	
 	my $pid;
 	if (DO_FORK) {
@@ -1014,7 +1088,7 @@ sub fork : method {
 	DEBUG_SLOW and sleep(0.2);
 	
 	if ($pid) {                         # successful fork; parent keeps track
-		$self->{chld}{$pid} = [ $slot ];
+		$self->{chld}{$pid} = [ $slot, $rh, \(my $o), time ];
 		$self->log->debug( "Parent server forked a new child [slot=$slot]. children: (".join(' ', $self->childs).")" )
 			if $self->verbose > 0;
 		
@@ -1026,6 +1100,8 @@ sub fork : method {
 	}
 	else {
 		$self->{is_parent} = 0;
+		$self->{chpipe} = $wh;
+		delete $self->{chld};
 		#DEBUG and $self->diag( "I'm forked child with slot $slot." );
 		#$self->log->prefix('CHILD F.'.$alias.':');
 		#$self->d->proc->info( state => FORKING, type => "child.$alias" );
@@ -1092,6 +1168,14 @@ sub stop {
 	}
 }
 
+sub parent_send {
+	my $self = shift;
+	my ($type, $buffer) = @_;
+	utf8::encode $buffer if utf8::is_utf8 $buffer;
+	syswrite($self->{chpipe}, pack('VV/a*',$type,$buffer))
+			== 8+length $buffer or warn $!;
+}
+
 sub setup_child_sig {
 	weaken( my $self = shift );
 	$SIG{PIPE} = 'IGNORE';
@@ -1106,7 +1190,14 @@ sub setup_child_sig {
 		}, 'Daemond::Lite::SIGNAL'),
 		INT => bless(sub {
 			local *__ANON__ = "SIGINT";
-			warn "SIGINT to child. ignored";
+			#warn "SIGINT to child. ignored";
+		}, 'Daemond::Lite::SIGNAL'),
+		USR2 => bless(sub {
+			local *__ANON__ = "SIGINT";
+			#warn "SIGUSR2 to child. ...";
+			$self->parent_send(0,$self->{slot});
+			#syswrite($self->{chpipe}, pack (C => $self->{slot}))
+			#	== 1 or warn $!;
 		}, 'Daemond::Lite::SIGNAL'),
 	);
 	
@@ -1148,13 +1239,13 @@ sub setup_child_sig {
 		for my $sig (keys %sig) {
 			$SIG{$sig} = $sig{$sig};
 		}
+		$SIG{VTALRM} = sub {
+				return delete $SIG{VTALRM} if !$self or $self->{shutdown};
+				$self->check_parent;
+				setitimer ITIMER_VIRTUAL, $interval, 0;
+		};
+		setitimer ITIMER_VIRTUAL, $interval, 0;
 	}
-	$SIG{VTALRM} = sub {
-			return delete $SIG{VTALRM} if !$self or $self->{shutdown};
-			$self->check_parent;
-			setitimer ITIMER_VIRTUAL, $interval, 0;
-	};
-	setitimer ITIMER_VIRTUAL, $interval, 0;
 	
 	return;
 }
