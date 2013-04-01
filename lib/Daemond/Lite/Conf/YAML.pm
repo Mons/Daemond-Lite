@@ -2,6 +2,7 @@ package Daemond::Lite::Conf::YAML;
 
 use strict;
 use parent 'YAML::Loader';
+use File::Basename;
 
 my $LIMIT_LOAD = 5;
 our $LOAD = 0;
@@ -31,7 +32,8 @@ sub _parse_explicit {
 		local $/;
 		my $tmp = <$rin>;
 		close $rin;
-		return  ref($self)->new($self->{pathinclude})->load($tmp); 
+		my ($name, $path) = File::Basename::fileparse($self->{pathinclude}.$node);
+		return  ref($self)->new($path)->load($tmp);
 	}
 	else {
 		return $self->SUPER::_parse_explicit(@_);
