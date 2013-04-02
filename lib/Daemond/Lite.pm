@@ -77,7 +77,7 @@ Daemond::Lite - Lightweight version of daemonization toolkit
 
 =cut
 
-our $VERSION = '0.14';
+our $VERSION = '0.15';
 
 use strict;
 no warnings 'uninitialized';
@@ -138,6 +138,7 @@ sub import {
 			1;
 		} or die;
 	}
+	
 	for my $m (qw(log)) {
 		my $log = $D->log;
 		eval qq{
@@ -145,6 +146,19 @@ sub import {
 			1;
 		} or die;
 	}
+	
+	eval qq{
+		sub ${caller}::abort :method {
+			return if \$D->{is_parent};
+			my \$this = shift;
+			\$this->log->critical(\@_);
+			kill TERM => getppid();
+			EV::unloop;
+			exit 255;
+		};
+		1;
+	} or die;
+	
 	$D->import_ext;
 }
 
@@ -175,7 +189,7 @@ sub proc {
 			: ""
 	)." (".(
 		exists $self->{is_parent} ?
-			!$self->{is_parent} ? "child" : "master"
+			!$self->{is_parent} ? "child $self->{slot}" : "master"
 			: "starting"
 	).")".": $msg (perl)";
 }
@@ -219,7 +233,6 @@ sub export_getopt(&) {
 	my $self = shift;
 	$self->{src}{options} = shift;
 }
-
 
 sub export_runit () {
 	my $self = shift;
@@ -735,7 +748,7 @@ sub merge_config {
 	my %cf = (
 		$self->_opt( 'name', [qw(src cfg env)], $0 ), # TODO
 		
-		$self->_opt('children', 1),
+		$self->_opt('children', [ qw(opt cfg src def) ], 1),
 		$self->_opt('verbose',  0),
 		$self->_opt('detach',   1),
 		$self->_opt('max_die',  10),
@@ -1257,6 +1270,7 @@ sub check_parent {
 	$self->log->alert("I've lost my parent, stopping...");
 	$self->stop;
 }
+
 sub exec_child {
 	my $self = shift;
 	my $slot = shift;
