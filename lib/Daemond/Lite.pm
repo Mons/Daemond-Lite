@@ -153,7 +153,7 @@ sub import {
 			my \$this = shift;
 			\$this->log->critical(\@_);
 			kill TERM => getppid();
-			EV::unloop;
+			EV::unloop() if defined &EV::unloop;
 			exit 255;
 		};
 		1;
