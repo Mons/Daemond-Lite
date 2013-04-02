@@ -26,7 +26,7 @@
 \bcover_db\b
 
 # Avoid local testing/dist files
-
+^MYMETA\.
 ^dist/
 ^makeall\.sh$
 ^tmp/
