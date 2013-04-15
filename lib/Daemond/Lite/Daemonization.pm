@@ -32,7 +32,7 @@ sub process {
 	my $name = $self->{cf}{name};
 	
 	my $proc = sub {
-		$0 = "<> $name".(
+		$0 = $Daemond::Lite::PROCPREFIX." $name".(
 		length $self->{cf}{identifier}
 			? " [$self->{cf}{identifier}]"
 			: ""

@@ -77,7 +77,7 @@ Daemond::Lite - Lightweight version of daemonization toolkit
 
 =cut
 
-our $VERSION = '0.15';
+our $VERSION = '0.16';
 
 use strict;
 no warnings 'uninitialized';
@@ -179,11 +179,39 @@ sub check_timeout { $_[0]{cf}{check_timeout} || 10 }
 sub name    { $_[0]{src}{name} || $_[0]{cfg}{name} || $0 }
 sub is_parent { $_[0]{is_parent} }
 
+our $PROCPREFIX;
+
+BEGIN {
+	if (-e "/proc/self/cmdline" ) {
+		open my $f, "<", "/proc/self/cmdline" or die "Can't open /proc/self/cmdline: $!";
+		local $/;
+		CHECKS: {
+			for my $pref ("*","<>") {
+				my $test = $pref . " Daemond::Lite: test";
+				local $0 = $test;
+				seek $f,0,0 or die "$!";
+				my $check = <$f>;
+				if ($test eq $check) {
+					$PROCPREFIX = $pref;
+					warn "Proc prefix '$pref' is good\n";
+					last CHECKS;
+				}
+				else {
+					warn "Proc prefix '$pref' is bad. String '$check' didn't match '$test'\n";
+				}
+			}
+			$PROCPREFIX = ":D";
+		}
+	} else {
+		$PROCPREFIX = "*";
+	}
+}
+
 sub proc {
 	my $self = shift;
 	my $msg = "@_";
 	$msg =~ s{[\r\n]+}{}sg;
-	$0 = "<> ".$self->{cf}{name}.(
+	$0 = $PROCPREFIX." ".$self->{cf}{name}.(
 		length $self->{cf}{identifier}
 			? " [$self->{cf}{identifier}]"
 			: ""

@@ -22,4 +22,4 @@ requires:
   Getopt::Long: 0
   Scalar::Util: 0
   Time::HiRes: 0
-version: 0.15
+version: 0.16

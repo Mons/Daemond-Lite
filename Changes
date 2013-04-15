@@ -1,5 +1,8 @@
 Revision history for Perl extension Daemond::Lite.
 
+0.16  15.05.2013
+	- Changed proc prefix to '*'. **cking linux
+
 0.14  22.03.13
 	- Add pipe-monitoring between parent and child
 	- Keep vtalarm only if no EV or AE
