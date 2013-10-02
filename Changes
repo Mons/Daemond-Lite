@@ -1,5 +1,8 @@
 Revision history for Perl extension Daemond::Lite.
 
+0.17  02.10.2013
+    - Child pipes buffer cleanup fix.
+
 0.16  15.05.2013
 	- Changed proc prefix to '*'. **cking linux
 
