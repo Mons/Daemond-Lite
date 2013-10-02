@@ -1007,7 +1007,7 @@ sub check_scoreboard {
 			while () {
 				last if length $$rbuf < $ix + 8;
 				my ($type,$l) = unpack 'VV', substr($$rbuf,$ix,8);
-				if ( length($rbuf) - $ix >= 8 + $l ) {
+				if ( length($$rbuf) - $ix >= 8 + $l ) {
 					if ($type == 0) {
 						# pong packet
 						my $x = substr($$rbuf,$ix+8,$l);
@@ -1025,7 +1025,7 @@ sub check_scoreboard {
 					last;
 				}
 			}
-			
+            $$rbuf = substr($$rbuf,$ix);
 		}
 		elsif (!defined $r) {
 			redo if $! == Errno::EINTR;
