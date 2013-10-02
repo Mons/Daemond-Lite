@@ -1025,7 +1025,7 @@ sub check_scoreboard {
 					last;
 				}
 			}
-            $$rbuf = substr($$rbuf,$ix);
+			$$rbuf = substr($$rbuf,$ix);
 		}
 		elsif (!defined $r) {
 			redo if $! == Errno::EINTR;
