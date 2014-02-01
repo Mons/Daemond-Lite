@@ -77,7 +77,7 @@ Daemond::Lite - Lightweight version of daemonization toolkit
 
 =cut
 
-our $VERSION = '0.17';
+our $VERSION = '0.18';
 
 use strict;
 no warnings 'uninitialized';
@@ -159,7 +159,8 @@ sub import {
 		1;
 	} or die;
 	
-	$D->import_ext;
+	@_ = ( $D,@_ );
+	goto &{ $D->can('import_ext') };
 }
 
 use Daemond::Lite::Say;
@@ -176,7 +177,7 @@ sub nosigdie {
 sub verbose { $_[0]{cf}{verbose} }
 sub exit_timeout { $_[0]{cf}{exit_timeout} || 10 }
 sub check_timeout { $_[0]{cf}{check_timeout} || 10 }
-sub name    { $_[0]{src}{name} || $_[0]{cfg}{name} || $0 }
+sub name    { $_[0]{src}{name} || $_[0]{cfg}{name} || $FindBin::Script || $0 }
 sub is_parent { $_[0]{is_parent} }
 
 our $PROCPREFIX;
