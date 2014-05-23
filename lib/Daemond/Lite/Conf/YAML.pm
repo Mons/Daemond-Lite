@@ -28,7 +28,7 @@ sub _parse_explicit {
 	my $self = shift;
 	my ($node, $explicit) = @_;
 	if (!ref $node and $explicit eq 'include') {
-		open ( my $rin, '<:raw', $self->{pathinclude}.$node) or warn("$!"),return "$node/error $!";
+		open ( my $rin, '<:raw', $self->{pathinclude}.$node) or warn("$self->{pathinclude}$node: $!"),return {error => "$node: $!"};
 		local $/;
 		my $tmp = <$rin>;
 		close $rin;

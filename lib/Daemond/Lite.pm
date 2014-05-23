@@ -77,7 +77,7 @@ Daemond::Lite - Lightweight version of daemonization toolkit
 
 =cut
 
-our $VERSION = '0.18';
+our $VERSION = '0.19';
 
 use strict;
 no warnings 'uninitialized';
@@ -108,6 +108,7 @@ use Time::HiRes qw(sleep time setitimer ITIMER_VIRTUAL);
 
 
 our $D;
+our @FIELDS = qw(env src opt cfg def cf slot caller logconfig cli pid config_file score startup shutdown dies forks chld chpipes chpipe is_parent this options detached watchers);
 sub log : method { $log }
 
 sub import_ext {}
@@ -121,7 +122,7 @@ sub import {
 			cfg => {},
 		};
 		bless $hash, $pk;
-		lock_keys %$hash, qw(env src opt cfg def cf slot caller logconfig cli pid config_file score startup shutdown dies forks chld chpipes chpipe is_parent this options detached watchers);
+		lock_keys %$hash, @FIELDS;
 		$hash;
 	};
 	my $caller = caller;
@@ -783,7 +784,7 @@ sub merge_config {
 		$self->_opt('max_die',  10),
 		
 		$self->_opt('cli', [qw(cfg src)], 1),
-		$self->_opt('pidfile', "/tmp/%n.%u.pid"),
+		$self->_opt('pidfile', ( -w "/var/run" ? "/var/run" : "/tmp" ) . "/%n.%u.pid"),
 		
 		start_timeout => 10,
 		signals => [qw(TERM INT QUIT HUP USR1 USR2)],
