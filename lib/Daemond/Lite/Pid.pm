@@ -77,7 +77,7 @@ sub lock {
 	my $pidfile = $self->{pidfile};
 	$pidfile =~ '%' and die "Pidfile contain non-translated entity\n";
 	
-	$self->d->say("Lock $pidfile");
+	$self->d->say("Lock $pidfile") unless $self->{opt}{silent};
 	
 	if (-e $pidfile) {
 		if ($self->{locked} = $self->do_lock) {

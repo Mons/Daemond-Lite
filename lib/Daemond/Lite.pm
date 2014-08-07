@@ -195,7 +195,7 @@ BEGIN {
 				my $check = <$f>;
 				if ($test eq $check) {
 					$PROCPREFIX = $pref;
-					warn "Proc prefix '$pref' is good\n";
+					#warn "Proc prefix '$pref' is good\n";
 					last CHECKS;
 				}
 				else {
@@ -290,6 +290,7 @@ sub export_runit () {
 		$self->{cli} = Daemond::Lite::Cli->new(
 			d => $self,
 			pid => $self->{pid},
+			opt => $self->{opt},
 		);
 		$self->{cli}->process();
 		#die "Not yet";
@@ -305,7 +306,7 @@ sub export_runit () {
 	else {
 		$self->warn("No CLI, no PID. Beware!");
 	}
-	$self->say("<g>starting up</>... (pidfile = ".$self->abs_path( $self->{cf}{pidfile} ).", pid = <y>$$</>, detach = ".$self->{cf}{detach}.")");
+	$self->say("<g>starting up</>... (pidfile = ".$self->abs_path( $self->{cf}{pidfile} ).", pid = <y>$$</>, detach = ".$self->{cf}{detach}.")") unless $self->{opt}{silent};
 	
 	if( $self->log->is_null ) {
 		$self->warn("You are using null Log::Any. We just setup a simple screen/syslog adapter. Maybe you need to set it up with Log::Any::Adapter?");
@@ -526,7 +527,7 @@ sub configure {
 			}
 		}}sge;
 		#warn $self->{cf}{pid};
-		$self->{pid} = Daemond::Lite::Pid->new( file => $self->abs_path($self->{cf}{pidfile}) );
+		$self->{pid} = Daemond::Lite::Pid->new( file => $self->abs_path($self->{cf}{pidfile}) , opt => $self->{opt} );
 		
 	}
 	
@@ -602,6 +603,11 @@ sub getopt_config {
 			setto   => sub {
 				$_[0]{pidfile} = Cwd::abs_path($_[1]);
 			},
+		},
+		{
+			desc   => 'Make start/stop process less verbose',
+			getopt => 'silent|s',
+			setto  => 'silent',
 		},
 		#{
 		#	desc    => '',

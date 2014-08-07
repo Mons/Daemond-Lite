@@ -145,13 +145,14 @@ sub process {
 				$self->die("Daemon not started in $timeout seconds. Possible something wrong. Look at syslog");
 			};
 			alarm $timeout;
-			$self->say("<y>waiting for $pid to gone</>..\0");
+			$self->say("<y>waiting for $pid to gone</>..\0") unless $self->{opt}{silent};
 			while(1) {
 				if( my $kid = waitpid $pid,WNOHANG ) {
 					my ($exitcode, $signal, $core) = ($? >> 8, $SIG[$? & 127] || ($? & 127), $? & 128);
 					if ($exitcode != 0 or $signal or $core) {
 						# Shit happens with our child
 						local $! = $exitcode;
+						$self->say("<y>waiting for $pid to gone</>..\0") if $self->{opt}{silent};
 						$self->sayn(
 							"<r>exited with code=$exitcode".($exitcode > 0 ? " ($!)" : '')." ".
 							($signal ? "(sig: $signal)":'').
@@ -160,25 +161,25 @@ sub process {
 						exit 255;
 					} else {
 						# it's ok
-						$self->sayn(" <g>done</>\n");
+						$self->sayn(" <g>done</>\n") unless $self->{opt}{silent};
 					}
 					sleep 0.1;
 					last;
 				} else {
-					$self->sayn(".");
+					$self->sayn(".") unless $self->{opt}{silent};
 					sleep 0.1;
 				}
 			}
-			$self->say("<y>Reading new pid</>...\0");
+			$self->say("<y>Reading new pid</>...\0") unless $self->{opt}{silent};
 			while (1) {
 				my $newpid = $self->{pid}->read;
 				if ($newpid == $pid) {
 					-e or $self->die("Pidfile disappeared. Possible daemon died. Look at syslog");
-					$self->sayn(".");
+					$self->sayn(".") unless $self->{opt}{silent};
 					sleep 0.1;
 				} else {
 					$pid = $newpid;
-					$self->sayn(" <g>$pid</>\n");
+					$self->sayn(" <g>$pid</>\n") unless $self->{opt}{silent};
 					last;
 				}
 			}

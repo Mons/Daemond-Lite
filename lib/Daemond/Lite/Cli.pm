@@ -96,18 +96,18 @@ sub kill {
 	if (kill(0, $pid)) {
 		$killed = 1;
 		kill(INT => $pid);
-		$self->d->say("<y>killing $pid with <b><w>INT</>");
+		$self->d->say("<y>killing $pid with <b><w>INT</>") unless $self->{opt}{silent};
 		my $t = time;
 		sleep(1) if kill(0, $pid);
 		if ($self->force_quit and kill(0, $pid)) {
-			$self->d->say("<y>waiting for $pid to die...</>");
+			$self->d->say("<y>waiting for $pid to die...</>") unless $self->{opt}{silent};
 			$talkmore = 1;
 			while(kill(0, $pid) && time - $t < $self->force_quit + 2) {
 				sleep(1);
 			}
 		}
 		if (kill(TERM => $pid)) {
-			$self->d->say("<y>killing $pid group with <b>TERM</><y>...</>");
+			$self->d->say("<y>killing $pid group with <b>TERM</><y>...</>") unless $self->{opt}{silent};
 			if ($self->force_quit) {
 				while(kill(0, $pid) && time - $t < $self->force_quit * 2) {
 					sleep(1);
@@ -117,7 +117,7 @@ sub kill {
 			}
 		}
 		if (kill(KILL =>  $pid)) {
-			$self->d->say("<y>killing $pid group with <r><b>KILL</><y>...</>");
+			$self->d->say("<y>killing $pid group with <r><b>KILL</><y>...</>") unless $self->{opt}{silent};
 			my $k9 = time;
 			my $max = $self->force_quit * 4;
 			$max = 60 if $max < 60;
@@ -126,7 +126,7 @@ sub kill {
 					print "Giving up on $pid ever dying.\n";
 					exit(1);
 				}
-				print "Waiting for $pid to die...\n";
+				print "Waiting for $pid to die...\n" unless $self->{opt}{silent};
 				sleep(1);
 			}
 		}
