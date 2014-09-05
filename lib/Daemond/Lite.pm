@@ -842,6 +842,7 @@ sub sig {
 	} else {
 		return if $sig eq 'INT';
 		return if $sig eq 'CHLD';
+		if ($sig eq 'USR1') { Carp::cluck(); return; }
 		if( my $cb = $self->{caller}->can( 'SIG'.$sig ) ) {
 			@_ = ($self,$sig);
 			goto &$cb;
@@ -1053,6 +1054,7 @@ sub check_scoreboard {
 				$self->log->error("Child $slot (pid:$pid) Not responding for %.0fs. Terming", time - $last  );
 				$data->[4]++;
 				warn "send TERM $pid";
+				kill USR1 => $pid;
 				kill TERM => $pid or do{
 					$self->log->warn( "kill TERM $pid failed: $!. Using KILL" );
 					kill KILL => $pid;
