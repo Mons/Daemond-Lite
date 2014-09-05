@@ -87,7 +87,7 @@ use FindBin;
 use Getopt::Long qw(:config gnu_compat bundling);
 use POSIX qw(WNOHANG);
 use Scalar::Util 'weaken';
-use Fcntl ();
+use Fcntl qw(F_SETFL O_NONBLOCK);
 use Hash::Util qw( lock_keys unlock_keys );
 
 use Daemond::Lite::Conf;
@@ -1123,7 +1123,7 @@ sub fork : method {
 	}
 	
 	pipe my $rh, my $wh or die "Watch pipe failed: $!";
-	fcntl $_, Fcntl::F_SETFL, Fcntl::O_NONBLOCK for $rh,$wh;
+	fcntl $_, F_SETFL, O_NONBLOCK for $rh,$wh;
 	
 	my $pid;
 	if (DO_FORK) {
