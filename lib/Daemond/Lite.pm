@@ -77,7 +77,7 @@ Daemond::Lite - Lightweight version of daemonization toolkit
 
 =cut
 
-our $VERSION = '0.19';
+our $VERSION = '0.191';
 
 use strict;
 no warnings 'uninitialized';
@@ -320,6 +320,19 @@ sub export_runit () {
 	$self->log->prefix("M[$$]: ") if $self->log->can('prefix');
 	
 	#warn "runit @_";
+	
+	if (defined $self->{cf}{children} and $self->{cf}{children} == 0 ) {
+		# child mode
+		$self->init_sig_handlers;
+		
+		$self->setup_signals;
+		$self->{is_parent} = 0;
+		$self->run_start;
+		
+		delete $self->{chld};
+		my $exec = $self->can('exec_child'); @_ = ($self, 1); goto &$exec;
+		exit 255;
+	}
 	
 	$self->{cf}{children} > 0 or $self->die("Need at least 1 child");
 	
