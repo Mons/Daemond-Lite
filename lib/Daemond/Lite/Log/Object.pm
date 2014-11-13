@@ -75,6 +75,10 @@ BEGIN {
 	for my $m (keys %METHOD) {
 		*$m = sub {
 			my $self = $_[0];
+			$self->{log} or do {
+				local $SIG{__WARN__};
+				return warn sprintf( "[%s] %s$_[1]", uc substr($m,0,4), $self->{prefix}, @_ > 2 ? (@_[2..$#_]) : ());
+			};
 			my $can = $self->{log}->can($m);
 			no warnings 'redefine';
 			*$m = sub {

@@ -98,6 +98,13 @@ use Time::HiRes qw(sleep time setitimer ITIMER_VIRTUAL);
 
 # TODO: sigtrap
 
+our @SIG;
+BEGIN {
+	use Config;
+	@SIG = split ' ',$Config{sig_name};
+	$SIG[0] = '';
+}
+
 #our $endcb;
 #use Sys::Syslog( ':standard', ':macros' );
 #END {
@@ -926,13 +933,13 @@ sub SIGCHLD {
 				$died = 1;
 				{
 					local $! = $exitcode;
-					$self->log->alert("Child $child died with $exitcode ($!) (".($signal ? "sig: $signal, ":'')." core: $core)");
+					$self->log->alert("Child $child died with $exitcode ($!) (".($signal ? "$signal/$SIG[$signal]":'')." core: $core)");
 				}
 			} else {
 				if ($signal || $core) {
 					{
 						local $! = $exitcode;
-						$self->log->alert("Child $child died with $signal (exit: $exitcode/$!, core: $core)");
+						$self->log->error("Child $child exited by signal $signal (core: $core)");
 					}
 				}
 				else {
