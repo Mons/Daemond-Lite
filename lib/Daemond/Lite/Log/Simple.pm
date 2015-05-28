@@ -6,13 +6,14 @@ use Carp;
 our %MAP;
 
 BEGIN {
-	if( eval{ require Sys::Syslog; } ) {
-		Sys::Syslog->import( ':standard', ':macros' );
-		*SYSLOG = sub () { 1 };
-	}
-	elsif( eval{ require Unix::Syslog } ) {
+	if( eval{ require Unix::Syslog } ) {
 		Unix::Syslog->import( ':macros', ':subs' );
 		*SYSLOG = sub () { 1 };
+	}
+	elsif( eval{ require Sys::Syslog; } ) {
+		Sys::Syslog->import( ':standard', ':macros' );
+		*SYSLOG = sub () { 1 };
+		warn "Usage of Sys::Syslog may be dangerous in long-running processes. Better install Unix::Syslog\n";
 	}
 	else {
 		*SYSLOG = sub () { 0 };
