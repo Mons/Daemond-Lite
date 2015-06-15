@@ -111,7 +111,7 @@ BEGIN {
 				utf8::encode $message if utf8::is_utf8 $message;
 				local $@;
 				eval {
-					syslog( $MAP{ lc($method) } || $MAP{warning}, $message );
+					syslog( $MAP{ lc($method) } || $MAP{warning}, "%s", $message );
 				};
 			}
 		};
