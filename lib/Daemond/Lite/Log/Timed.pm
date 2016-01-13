@@ -8,18 +8,20 @@ use Time::Local qw( timelocal_nocheck timegm_nocheck );
 our %MAP;
 
 BEGIN {
-	if( eval{ require Sys::Syslog; } ) {
-		Sys::Syslog->import( ':standard', ':macros' );
-		*SYSLOG = sub () { 1 };
-	}
-	elsif( eval{ require Unix::Syslog } ) {
+	if( eval{ require Unix::Syslog } ) {
 		Unix::Syslog->import( ':macros', ':subs' );
 		*SYSLOG = sub () { 1 };
+	}
+	elsif( eval{ require Sys::Syslog; } ) {
+		Sys::Syslog->import( ':standard', ':macros' );
+		*SYSLOG = sub () { 1 };
+		warn "Usage of Sys::Syslog may be dangerous in long-running processes. Better install Unix::Syslog\n";
 	}
 	else {
 		*SYSLOG = sub () { 0 };
 	}
 }
+
 BEGIN {
 	if (SYSLOG) {
 		%MAP = (
@@ -107,7 +109,9 @@ sub new {
 		screen => 1,
 		syslog => SYSLOG,
 		d      => $d,
-		tzoff  => 
+		tzoff  => 0,
+		write_time_to_syslog => 1,
+		@_,
 	}, $pkg;
 	$self;
 }
@@ -122,7 +126,7 @@ BEGIN {
 				$msg = sprintf $msg, @_;
 			}
 			$msg =~ s{\n*$}{};
-			$msg = date().' '.$msg;
+			my $fullmsg = date().' '.$msg;
 			if ($self->{screen}) {
 				binmode STDOUT,':raw';
 				{
@@ -130,7 +134,7 @@ BEGIN {
 					if (-t STDOUT) {
 						print STDOUT "\e[".( $COLOR{$method} || 0 )."m";
 					}
-					print STDOUT "[".uc( substr($method,0,4) )."] ".$msg;
+					print STDOUT "[".uc( substr($method,0,4) )."] ".$fullmsg;
 					if (-t STDOUT) {
 						print STDOUT "\e[0m";
 					}
@@ -142,7 +146,7 @@ BEGIN {
 					$self->{syslogopened} = 1;
 					openlog( $self->{d}->name, 0, LOG_DAEMON() );
 				}
-				my $message = (exists $MAP{lc $method} ? '': "[$method] ").$msg;
+				my $message = (exists $MAP{lc $method} ? '': "[$method] ").( $self->{write_time_to_syslog} ? $fullmsg : $msg );
 				utf8::encode $message if utf8::is_utf8 $message;
 				local $@;
 				eval {

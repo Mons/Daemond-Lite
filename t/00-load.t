@@ -8,8 +8,9 @@
 use strict;
 use warnings;
 
-use Test::More tests => 1;
+use Test::More tests => 2;
 BEGIN { use_ok('Daemond::Lite') };
+BEGIN { use_ok('Daemond::Lite::Log::Timed') };
 
 #########################
 
