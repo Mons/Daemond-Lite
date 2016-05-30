@@ -1230,7 +1230,10 @@ sub stop {
 	if ($self->{is_parent}) {
 		
 	} else {
-			$self->{shutdown}++ and exit(1);
+			if ($self->{shutdown}++) {
+				$self->log->debug('Repeated stop signal - exiting immediately with 0');
+				CORE::exit(0);
+			}
 			if( my $cb = $self->{caller}->can( 'stop' ) ) {
 				$cb->($self);
 			} else {
