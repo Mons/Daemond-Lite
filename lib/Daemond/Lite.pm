@@ -77,7 +77,7 @@ Daemond::Lite - Lightweight version of daemonization toolkit
 
 =cut
 
-our $VERSION = '0.196';
+our $VERSION = '0.197';
 
 use strict;
 no warnings 'uninitialized';
@@ -185,6 +185,7 @@ sub nosigdie {
 sub verbose { $_[0]{cf}{verbose} }
 sub exit_timeout { $_[0]{cf}{exit_timeout} || 10 }
 sub check_timeout { $_[0]{cf}{check_timeout} || 10 }
+sub sleep_timeout { $_[0]{cf}{sleep_timeout} || 1 }
 sub name    { $_[0]{src}{name} || $_[0]{cfg}{name} || $FindBin::Script || $0 }
 sub is_parent { $_[0]{is_parent} }
 
@@ -273,6 +274,7 @@ sub export_getopt(&) {
 
 sub export_runit () {
 	my $self = shift;
+	my $argv = "@ARGV";
 	$self->configure;
 	if( $self->{logconfig} and my $newlog = ( delete $self->{logconfig} )->( $self, $self->{cf}{detach} ) ) {
 		Daemond::Lite::Log->set( $newlog );
@@ -356,7 +358,7 @@ sub export_runit () {
 	$self->setup_scoreboard;
 	$self->{startup} = 1;
 	$self->{is_parent} = 1;
-	$self->proc("ready");
+	$self->proc($argv);
 	
 	
 	$self->run_start;
@@ -397,7 +399,7 @@ sub export_runit () {
 		}
 		
 		
-		$self->idle or sleep 0.1;
+		$self->idle or sleep $self->sleep_timeout;
 	}
 	
 	$self->shutdown();

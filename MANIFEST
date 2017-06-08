@@ -9,6 +9,7 @@ lib/Daemond/Lite/Log.pm
 lib/Daemond/Lite/Log/AdapterScreen.pm
 lib/Daemond/Lite/Log/Object.pm
 lib/Daemond/Lite/Log/Simple.pm
+lib/Daemond/Lite/Log/Timed.pm
 lib/Daemond/Lite/Pid.pm
 lib/Daemond/Lite/Say.pm
 lib/Daemond/mon.pl
