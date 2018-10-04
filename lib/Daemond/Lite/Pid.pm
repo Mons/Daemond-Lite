@@ -83,7 +83,7 @@ sub lock {
 		if ($self->{locked} = $self->do_lock) {
 			#warn "Locked existing file";
 			chomp( my $pid = do { open my $p,'<',$pidfile; local $/; <$p> }  );
-			if ($pid) {
+			if ($pid and $pid != $$) {
 				#warn "$appname - have stalled (not locked) pidfile with pid $pid\n";
 				die "Have running process with pid $pid. Won't do anything. Fix this yourself\n" if kill 0 => $pid;
 				truncate $self->{pidhandle},0;
@@ -197,6 +197,13 @@ sub do_lock {
 		}
 	}
 	return $r;
+}
+
+sub do_unlock {
+	my $self = shift;
+	# FIXME: check handler
+	flock($self->{pidhandle}, LOCK_UN);
+	return;
 }
 
 sub write : method {
