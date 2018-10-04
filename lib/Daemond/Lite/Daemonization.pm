@@ -29,6 +29,7 @@ sub process {
 	my $self = shift; # << Really a daemon object
 	return unless $self->{cf}{detach};
 	return if $self->{detached}++;
+	return if $self->{nest};
 	my $name = $self->{cf}{name};
 	
 	my $proc = sub {

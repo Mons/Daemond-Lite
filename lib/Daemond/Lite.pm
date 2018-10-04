@@ -87,8 +87,9 @@ use FindBin;
 use Getopt::Long qw(:config gnu_compat bundling);
 use POSIX qw(WNOHANG);
 use Scalar::Util 'weaken';
-use Fcntl qw(F_SETFL O_NONBLOCK);
+use Fcntl qw(F_GETFD F_SETFD F_SETFL O_NONBLOCK FD_CLOEXEC);
 use Hash::Util qw( lock_keys unlock_keys );
+use Storable qw(nfreeze thaw);
 
 use Daemond::Lite::Conf;
 use Daemond::Lite::Log '$log';
@@ -112,11 +113,18 @@ BEGIN {
 #	$endcb && $endcb->();
 #}
 
-
-
 our $D;
-our @FIELDS = qw(env src opt cfg def cf slot caller logconfig cli pid config_file score startup shutdown dies forks chld chpipes chpipe is_parent this options detached watchers);
+our @FIELDS = qw(env src opt cfg def cf slot caller logconfig cli pid config_file score startup shutdown dies forks chld chpipes chpipe is_parent this options detached watchers nest rising retirees reloadable ppid);
 sub log : method { $log }
+
+my @argv = ($0, @ARGV);
+
+sub set_nocloexec {
+	my $fh = shift;
+	my $flags = fcntl $fh, F_GETFD, 0 or return;
+	fcntl $fh, F_SETFD, $flags & ~FD_CLOEXEC;
+}
+
 
 sub import_ext {}
 sub import {
@@ -290,10 +298,25 @@ sub export_runit () {
 		} or die;
 	}
 	
+	$self->init_sig_handlers;
 	
 	$self->proc("configuring");
 	
-	if ($self->{cf}{cli}) {
+	$self->{reloadable} = $self->{caller}->can('perish') and $self->{caller}->can('rise');
+	
+	# Phoenix variables
+	my $nestpath = "/tmp/$$.nest";
+	my $nest_no = 0 + delete $ENV{"\x7fnest\x7f"};
+	
+	if ($nest_no) {
+		$self->warn("Found nest in $nestpath (#$nest_no)");
+		#($nest_no) = ($nest_no =~ m{/([^/]+)$}g);
+		open $self->{nest}, "+<&=$nest_no" or die "open: $!";
+		if ($self->{pid}) {
+			$self->{pid}->lock or die "Pid lock failed";
+		}
+	}
+	elsif ($self->{cf}{cli}) {
 		#warn "Running cli";
 		require Daemond::Lite::Cli;
 		$self->{cli} = Daemond::Lite::Cli->new(
@@ -332,8 +355,6 @@ sub export_runit () {
 	
 	if (defined $self->{cf}{children} and $self->{cf}{children} == 0 ) {
 		# child mode
-		$self->init_sig_handlers;
-		
 		$self->setup_signals;
 		$self->{is_parent} = 0;
 		$self->run_start;
@@ -352,20 +373,19 @@ sub export_runit () {
 	$self->log->notice("daemonized");
 	$self->proc("starting");
 	
-	$self->init_sig_handlers;
-	
 	$self->setup_signals;
 	$self->setup_scoreboard;
 	$self->{startup} = 1;
 	$self->{is_parent} = 1;
 	$self->proc($argv);
 	
-	
 	$self->run_start;
 	
 	my $grd = Daemond::Lite::Guard::guard {
 		$log->warn("Leaving parent scope") if $self->{is_parent};
 	};
+	
+	my $kill_retired = 1;
 	while () {
 		#$self->d->proc->action('idle');
 		if ($self->{shutdown}) {
@@ -398,6 +418,10 @@ sub export_runit () {
 			}
 		}
 		
+		if ($kill_retired and $self->{retirees}) {
+			kill TERM => $_ or delete $self->{retirees}{$_} for keys %{ $self->{retirees} };
+			$kill_retired = 0;
+		}
 		
 		$self->idle or sleep $self->sleep_timeout;
 	}
@@ -410,6 +434,46 @@ sub export_runit () {
 
 sub run_check {
 	my $self = shift;
+	
+	$self->{rising} = 1; # It can be overrided by following code.
+	
+	if ($self->{nest}) {
+		my $buf;
+		my $nest_size = (stat $self->{nest})[7];
+		seek $self->{nest}, 0, 0;
+		sysread $self->{nest}, $buf, $nest_size or die "sysread: $!";
+		($self->{rising}, my ($perl_version, $mod_version, $data))  =
+				unpack("IA8I/A*I/A*", $buf);
+		# warn "Nest size: $nest_size";
+		# warn "Rising: $self->{rising}";
+		# warn "Perl: $perl_version";
+		# warn "Mod: $mod_version";
+		# warn "Data length: ", length($data);
+		# warn Dumper(thaw($data));
+		my $data = thaw($data);
+		# We have to unmask USR1
+		{
+			use POSIX;
+			for my $num (30,10,16) { # All the codes for USR1, see man 7 signal
+				# There is some black magick stolen from Signal::Mask
+				my $ret = POSIX::SigSet->new($num);
+				sigprocmask(SIG_UNBLOCK, POSIX::SigSet->new($num), $ret);
+				# end of magick
+			}
+		}
+		if ($data->{retirees}) {
+			$self->{retirees} = $data->{retirees};
+			kill 0 => $_ or delete($self->{retirees}{$_}) for keys %{$self->{retirees}};
+		}
+		#kill TERM => $_ for keys %{ $self->{retirees} };
+		if( my $cb = $self->{caller}->can('rise') ) {
+			$cb->($self, $data->{data});
+			return;
+		} else {
+			die "Reload filed: new code can not rise";
+		}
+	}
+	
 	if (my $check = $self->{caller}->can('check')) {
 		eval{
 			$check->($self);
@@ -855,6 +919,37 @@ sub sig {
 	my $self = shift;
 	my $sig = shift;
 	if ($self->is_parent) {
+		if ($sig eq 'USR1') {
+			if( my $cb = $self->{caller}->can('perish') ) {
+				unless($self->{nest}) {
+					my $nestpath = "/tmp/$$.nest";
+					$self->{rising} = 1;
+					open $self->{nest}, "+>", $nestpath or die "open: $!";
+					unlink $nestpath;
+				}
+				my $data = $cb->($self);
+				my %retirees;
+				map({ $retirees{$_} = $self->{chld}{$_}[3] } keys %{$self->{chld}}) if $self->{chld};
+				map({ $retirees{$_} = $self->{retirees}{$_} } keys %{$self->{retirees}}) if $self->{retirees};
+				$data = nfreeze({
+					data => $data,
+					retirees => { %retirees },
+				});
+				$self->{rising}++;
+				truncate $self->{nest}, 0;
+				my $buf = pack("IA8I/A*I/A*", $self->{rising}, $], $VERSION, $data);
+				seek $self->{nest},0,0;
+				syswrite $self->{nest}, $buf;
+				# exec $^X, $0, @ARGV;
+				$self->{pid}->do_unlock();
+				set_nocloexec($self->{nest});
+				$ENV{"\x7fnest\x7f"} = fileno $self->{nest};
+				#exec $^X, $FindBin::Bin . "/" . $FindBin::Script, @ARGV;
+				exec $^X, @argv;
+				return;
+			}
+			# FIXME: What if not?
+		}
 		if( my $sigh = $self->can('SIG'.$sig)) {
 			@_ = ($self);
 			goto &$sigh;
@@ -913,14 +1008,15 @@ sub SIGTERM {
 sub SIGINT {
 	my $self = shift;
 	if ($self->{shutdown}) {
-		my %chld = %{$self->{chld}};
+		my %chld;
+		if ($self->{chld}) { map({ $chld{$_} = $self->{chld}{$_} } keys %{$self->{chld}}) }
+		if ($self->{retirees}) { map({ $chld{$_} = $self->{retirees}{$_} } keys %{$self->{retirees}}) }
 		my $sig = $self->{shutdown} < 3 ? 'TERM' : 'KILL';
-		if ( $self->{chld} and %chld  ) {
+		if ( %chld  ) {
 			# tell children once again!
 			$self->log->debug("Again ${sig}'ing children [@{[ keys %chld ]}]");
 			kill $sig => $_ or $self->error("Killing $_ failed: $!") for keys %chld;
 		}
-		
 	}
 	$self->{shutdown} = 1;
 }
@@ -963,8 +1059,9 @@ sub SIGCHLD {
 					} else {
 						$self->{dies} = 0;
 					}
-				} 
-				else {
+				} elsif (delete $self->{retirees}{$pid}) {
+					$self->log->debug("Old $pid gone");
+				} else {
 					$self->log->warn("CHLD for $pid child of someone else.");
 				}
 			}
@@ -1016,6 +1113,8 @@ sub check_scoreboard {
 	my $count = $self->{cf}{children};
 	my $check = 0;
 	my $update = 0;
+	# FIXME: We must not update time for child that was killed by TERM signal.
+	# It should die.
 	while( my ($pid, $data) = each %{ $self->{chld} } ) {
 		my ($slot) = @$data;
 		if (kill 0 => $pid) {
@@ -1193,9 +1292,12 @@ sub shutdown {
 	
 	my $finishing = time;
 	
-	my %chld = %{$self->{chld}};
+	my %chld;
+	if ($self->{chld}) { map({ $chld{$_} = $self->{chld}{$_} } keys %{$self->{chld}}) }
+	if ($self->{retirees}) { map({ $chld{$_} = $self->{retirees}{$_} } keys %{$self->{retirees}}) }
+	
 	#$SIG{CHLD} = 'IGNORE';
-	if ( $self->{chld} and %chld  ) {
+	if ( %chld  ) {
 		# tell children to go away
 		$self->log->debug("TERM'ing children [@{[ keys %chld ]}]") if $self->verbose > 1;
 		kill TERM => $_ or delete($chld{$_}),$self->warn("Killing $_ failed: $!") for keys %chld;
@@ -1263,19 +1365,24 @@ sub setup_child_sig {
 			local *__ANON__ = "SIGTERM";
 			warn "SIGTERM received"; 
 			$self->stop;
-		}, 'Daemond::Lite::SIGNAL'),
+		}, 'Daemond::Lite::SIGNAL::TERM'),
 		INT => bless(sub {
 			local *__ANON__ = "SIGINT";
 			#warn "SIGINT to child. ignored";
-		}, 'Daemond::Lite::SIGNAL'),
+		}, 'Daemond::Lite::SIGNAL::INT'),
 		USR2 => bless(sub {
 			local *__ANON__ = "SIGINT";
 			#warn "SIGUSR2 to child. ...";
 			$self->parent_send(0,$self->{slot});
 			#syswrite($self->{chpipe}, pack (C => $self->{slot}))
 			#	== 1 or warn $!;
-		}, 'Daemond::Lite::SIGNAL'),
+		}, 'Daemond::Lite::SIGNAL::USR2'),
 	);
+	# *Daemond::Lite::SIGNAL::DESTROY = sub { Carp::cluck "DESTROYED $_[0]"; };
+	# for (qw{TERM INT USR2}) {
+	# 	no strict 'refs';
+	# 	*{ "Daemond::Lite::SIGNAL::DESTROY::$_" } = sub {Carp::cluck "DESTROYED $_[0]"; };
+	# }
 	
 	my $usersig;
 	if( my $cb = $self->{caller}->can( 'on_sig' ) ) {
@@ -1296,7 +1403,6 @@ sub setup_child_sig {
 			for my $sig (keys %sig) {
 				$self->{watchers}{sig}{$sig} = &EV::signal( $sig => $sig{$sig} );
 			}
-			
 		}
 	}
 	elsif ($INC{'AnyEvent.pm'}) {
@@ -1328,8 +1434,8 @@ sub setup_child_sig {
 
 sub check_parent {
 	my $self = shift;
-	#return if kill 0, $self->{ppid};
-	return if kill 0, getppid();
+	return if kill 0, $self->{ppid};
+	# return if kill 0, getppid();
 	$self->log->alert("I've lost my parent, stopping...");
 	$self->stop;
 }
@@ -1338,6 +1444,7 @@ sub exec_child {
 	my $self = shift;
 	my $slot = shift;
 	delete $self->{chld};
+	$self->{ppid} = getppid();
 	$self->{slot} = $slot;
 	$self->log->prefix("C${slot}[$$]: ") if $self->log->can('prefix');
 	$self->setup_child_sig;
