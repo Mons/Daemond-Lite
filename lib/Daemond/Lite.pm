@@ -419,7 +419,7 @@ sub export_runit () {
 		}
 		
 		if ($kill_retired and $self->{retirees}) {
-			kill TERM => $_ or delete $self->{retirees}{$_} for keys %{ $self->{retirees} };
+			kill USR1 => $_ or delete $self->{retirees}{$_} for keys %{ $self->{retirees} };
 			$kill_retired = 0;
 		}
 		
@@ -454,12 +454,10 @@ sub run_check {
 		# We have to unmask USR1
 		{
 			use POSIX;
-			for my $num (30,10,16) { # All the codes for USR1, see man 7 signal
-				# There is some black magick stolen from Signal::Mask
-				my $ret = POSIX::SigSet->new($num);
-				sigprocmask(SIG_UNBLOCK, POSIX::SigSet->new($num), $ret);
-				# end of magick
-			}
+			# There is some black magick stolen from Signal::Mask
+			my $ret = POSIX::SigSet->new(POSIX::SIGUSR1);
+			sigprocmask(SIG_UNBLOCK, POSIX::SigSet->new(POSIX::SIGUSR1), $ret);
+			# end of magick
 		}
 		if ($data->{retirees}) {
 			$self->{retirees} = $data->{retirees};
@@ -1366,6 +1364,15 @@ sub setup_child_sig {
 			warn "SIGTERM received"; 
 			$self->stop;
 		}, 'Daemond::Lite::SIGNAL::TERM'),
+		USR1 => bless(sub {
+			local *__ANON__ = "SIGTERM";
+			warn "SIGUSR1 received";
+			if($self->{caller}->can('retire')) {
+				$self->{caller}->can('retire')->($self);
+			} else {
+				$self->stop();
+			}
+		}, 'Daemond::Lite::SIGNAL::USR1'),
 		INT => bless(sub {
 			local *__ANON__ = "SIGINT";
 			#warn "SIGINT to child. ignored";
