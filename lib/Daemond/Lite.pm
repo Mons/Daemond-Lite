@@ -114,7 +114,7 @@ BEGIN {
 #}
 
 our $D;
-our @FIELDS = qw(env src opt cfg def cf slot caller logconfig cli pid config_file score startup shutdown dies forks chld chpipes chpipe is_parent this options detached watchers nest rising retirees reloadable ppid);
+our @FIELDS = qw(env src opt cfg def cf slot caller logconfig cli pid config_file score startup shutdown dies forks chld chpipes chpipe is_parent this options detached watchers nest rising retirees reloadable ppid log_level);
 sub log : method { $log }
 
 my @argv = ($0, @ARGV);
@@ -195,6 +195,7 @@ sub exit_timeout { $_[0]{cf}{exit_timeout} || 10 }
 sub check_timeout { $_[0]{cf}{check_timeout} || 10 }
 sub sleep_timeout { $_[0]{cf}{sleep_timeout} || 1 }
 sub name    { $_[0]{src}{name} || $_[0]{cfg}{name} || $FindBin::Script || $0 }
+sub log_level { $_[0]{log_level} }
 sub is_parent { $_[0]{is_parent} }
 
 our $PROCPREFIX;
@@ -614,7 +615,18 @@ sub configure {
 		$self->{pid} = Daemond::Lite::Pid->new( file => $self->abs_path($self->{cf}{pidfile}) , opt => $self->{opt} );
 		
 	}
-	
+
+	my $log_level = $self->{cfg}{log_level};
+	my %log_methods = %Daemond::Lite::Log::logging_methods;
+	if ($log_level) {
+		unless ( exists $log_methods{$log_level} ) {
+			$self->die("Bad log_level in config: $log_level\n");
+		}
+		$self->{log_level} = $log_methods{$log_level};
+	}
+	else {
+		$self->{log_level} = $log_methods{trace};
+	}
 }
 
 sub env_config {

@@ -18,7 +18,21 @@ BEGIN {
 	}
 }
 =cut
+
+our %logging_methods;
+
 BEGIN {
+	%logging_methods = (
+		trace     => 8,
+		debug     => 7,
+		info      => 6,
+		notice    => 5,
+		warning   => 4,
+		error     => 3,
+		critical  => 2,
+		alert     => 1,
+		emergency => 0,
+	);
 	require Daemond::Lite::Log::Object;
 	require Daemond::Lite::Log::Simple;
 	*HAVE_LOG_ANY = sub () { 0 };
