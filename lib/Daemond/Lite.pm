@@ -187,7 +187,7 @@ sub exit_timeout { $_[0]{cf}{exit_timeout} || 10 }
 sub check_timeout { $_[0]{cf}{check_timeout} || 10 }
 sub sleep_timeout { $_[0]{cf}{sleep_timeout} || 1 }
 sub name    { $_[0]{src}{name} || $_[0]{cfg}{name} || $FindBin::Script || $0 }
-sub log_level { $_[0]{log_level} || $Daemond::Lite::Log::logging_methods{trace} }
+sub log_level { $_[0]{log_level} }
 sub is_parent { $_[0]{is_parent} }
 
 our $PROCPREFIX;
@@ -561,6 +561,9 @@ sub configure {
 			$self->die("Bad log_level in config: $log_level\n");
 		}
 		$self->{log_level} = $log_methods{$log_level};
+	}
+	else {
+		$self->{log_level} = $log_methods{trace};
 	}
 }
 
