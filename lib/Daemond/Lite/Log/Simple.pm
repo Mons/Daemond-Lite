@@ -2,6 +2,7 @@ package Daemond::Lite::Log::Simple;
 
 use strict;
 use Carp;
+use Daemond::Lite::Log ();
 
 our %MAP;
 
@@ -35,7 +36,7 @@ BEGIN {
 	}
 }
 
-our ( %log_level_aliases, @logging_methods, @logging_aliases );
+our ( %log_level_aliases, %logging_methods, @logging_aliases );
 
 BEGIN {
 	%log_level_aliases = (
@@ -45,7 +46,7 @@ BEGIN {
 		crit   => 'critical',
 		fatal  => 'critical'
 	);
-	@logging_methods = qw(trace debug info notice warning error critical alert emergency);
+	*logging_methods = \%Daemond::Lite::Log::logging_methods;
 	@logging_aliases = keys(%log_level_aliases);
 }
 
@@ -76,10 +77,11 @@ sub new {
 
 BEGIN {
 	no strict 'refs';
-	for my $method ( @logging_methods, ) {
+	for my $method ( keys %logging_methods, ) {
 		*$method = sub {
 			my $self = shift;
 			my $msg = shift;
+			return if $logging_methods{$method} > $self->{d}->log_level;
 			if (@_ and index($msg,'%') > -1) {
 				$msg = sprintf $msg, @_;
 			}
