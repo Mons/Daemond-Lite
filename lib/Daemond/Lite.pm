@@ -618,11 +618,17 @@ sub configure {
 
 	my $log_level = $self->{cfg}{log_level};
 	my %log_methods = %Daemond::Lite::Log::logging_methods;
+	my %log_methods_numbers = %Daemond::Lite::Log::logging_methods_numbers;
 	if ($log_level) {
-		unless ( exists $log_methods{$log_level} ) {
+		if (exists $log_methods{$log_level}) {
+			$self->{log_level} = $log_methods{$log_level};
+		}
+		elsif (exists $log_methods_numbers{$log_level}) {
+			$self->{log_level} = $log_level;
+		}
+		else {
 			$self->die("Bad log_level in config: $log_level\n");
 		}
-		$self->{log_level} = $log_methods{$log_level};
 	}
 	else {
 		$self->{log_level} = $log_methods{trace};
