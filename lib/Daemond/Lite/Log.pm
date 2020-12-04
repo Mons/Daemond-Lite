@@ -19,7 +19,7 @@ BEGIN {
 }
 =cut
 
-our %logging_methods;
+our (%logging_methods, %logging_methods_numbers);
 
 BEGIN {
 	%logging_methods = (
@@ -33,6 +33,7 @@ BEGIN {
 		alert     => 1,
 		emergency => 0,
 	);
+	%logging_methods_numbers = reverse %logging_methods;
 	require Daemond::Lite::Log::Object;
 	require Daemond::Lite::Log::Simple;
 	*HAVE_LOG_ANY = sub () { 0 };
