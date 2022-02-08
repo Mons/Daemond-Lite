@@ -23,7 +23,7 @@ BEGIN {
 	else {
 		$HAVE_YAML = 0;
 	}
-	*HAVE_YAML = sub () { $HAVE_YAML };
+	*HAVE_YAML = do{ my $v = $HAVE_YAML; sub () { $v }; };
 }
 
 sub load {
